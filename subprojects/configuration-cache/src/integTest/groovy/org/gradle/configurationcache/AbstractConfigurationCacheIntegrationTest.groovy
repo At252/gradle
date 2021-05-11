@@ -33,8 +33,6 @@ abstract class AbstractConfigurationCacheIntegrationTest extends AbstractOptInFe
     static final String DISABLE_GRADLE_PROP = "${ConfigurationCacheOption.PROPERTY_NAME}=false"
     static final String DISABLE_SYS_PROP = "-D$DISABLE_GRADLE_PROP"
 
-    static final String WARN_PROBLEMS_CLI_OPT = "--${ConfigurationCacheProblemsOption.LONG_OPTION}=warn"
-
     static final String MAX_PROBLEMS_GRADLE_PROP = "${ConfigurationCacheMaxProblemsOption.PROPERTY_NAME}"
     static final String MAX_PROBLEMS_SYS_PROP = "-D$MAX_PROBLEMS_GRADLE_PROP"
 
