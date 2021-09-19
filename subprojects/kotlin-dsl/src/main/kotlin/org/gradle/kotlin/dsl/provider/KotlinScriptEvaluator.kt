@@ -180,9 +180,10 @@ class StandardKotlinScriptEvaluator(
         }
 
         override fun startCompilerOperation(description: String): AutoCloseable {
+            val operationDescription = "Compiling $description"
             val operation = progressLoggerFactory
                 .newOperation(KotlinScriptEvaluator::class.java)
-                .start("Compiling script into cache", "Compiling $description into local compilation cache")
+                .start(operationDescription, operationDescription)
             return AutoCloseable { operation.completed() }
         }
 
@@ -283,13 +284,14 @@ class StandardKotlinScriptEvaluator(
     class ScopeBackedCompiledScript(
         private val classLoaderScope: ClassLoaderScope,
         private val childScopeId: String,
-        private val classPath: ClassPath,
+        override val classPath: ClassPath,
         private val className: String
     ) : CompiledScript {
         private
         var loadedClass: Class<*>? = null
         var scope: ClassLoaderScope? = null
 
+        @get:Synchronized
         override val program: Class<*>
             get() {
                 if (loadedClass == null) {
@@ -300,6 +302,7 @@ class StandardKotlinScriptEvaluator(
                 return loadedClass!!
             }
 
+        @Synchronized
         override fun onReuse() {
             scope?.let {
                 // Recreate the script scope and ClassLoader, so that things that use scopes are notified that the scope exists
@@ -309,7 +312,13 @@ class StandardKotlinScriptEvaluator(
         }
 
         private
-        fun prepareClassLoaderScope() = classLoaderScope.createLockedChild(childScopeId, classPath, null, null)
+        fun prepareClassLoaderScope() =
+            classLoaderScope.createLockedChild(
+                childScopeId,
+                classPath,
+                null,
+                null
+            )
     }
 }
 

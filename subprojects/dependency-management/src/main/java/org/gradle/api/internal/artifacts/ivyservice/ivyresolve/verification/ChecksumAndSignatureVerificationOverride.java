@@ -32,6 +32,7 @@ import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.ModuleComponentRe
 import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.verification.report.DependencyVerificationReportWriter;
 import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.verification.report.VerificationReport;
 import org.gradle.api.internal.artifacts.verification.serializer.DependencyVerificationsXmlReader;
+import org.gradle.api.internal.artifacts.verification.signatures.BuildTreeDefinedKeys;
 import org.gradle.api.internal.artifacts.verification.signatures.SignatureVerificationService;
 import org.gradle.api.internal.artifacts.verification.signatures.SignatureVerificationServiceFactory;
 import org.gradle.api.internal.artifacts.verification.verifier.DependencyVerifier;
@@ -77,7 +78,7 @@ public class ChecksumAndSignatureVerificationOverride implements DependencyVerif
     public ChecksumAndSignatureVerificationOverride(BuildOperationExecutor buildOperationExecutor,
                                                     File gradleUserHome,
                                                     File verificationsFile,
-                                                    File keyRingsFile,
+                                                    BuildTreeDefinedKeys keyrings,
                                                     ChecksumService checksumService,
                                                     SignatureVerificationServiceFactory signatureVerificationServiceFactory,
                                                     DependencyVerificationMode verificationMode,
@@ -97,7 +98,7 @@ public class ChecksumAndSignatureVerificationOverride implements DependencyVerif
         } catch (InvalidUserDataException e) {
             throw new InvalidUserDataException("Unable to read dependency verification metadata from " + verificationsFile, e.getCause());
         }
-        this.signatureVerificationService = signatureVerificationServiceFactory.create(keyRingsFile, keyServers());
+        this.signatureVerificationService = signatureVerificationServiceFactory.create(keyrings, keyServers(), verifier.getConfiguration().isUseKeyServers());
     }
 
     private List<URI> keyServers() {
@@ -171,7 +172,7 @@ public class ChecksumAndSignatureVerificationOverride implements DependencyVerif
                     Collection<RepositoryAwareVerificationFailure> value = entry.getValue();
                     return value.stream().noneMatch(wrapper -> wrapper.getFailure().isFatal());
                 });
-                VerificationReport report = reportWriter.generateReport(displayName, failures);
+                VerificationReport report = reportWriter.generateReport(displayName, failures, verifier.getConfiguration().isUseKeyServers());
                 String errorMessage = buildConsoleErrorMessage(report);
                 if (verificationMode == DependencyVerificationMode.LENIENT) {
                     LOGGER.error(errorMessage);

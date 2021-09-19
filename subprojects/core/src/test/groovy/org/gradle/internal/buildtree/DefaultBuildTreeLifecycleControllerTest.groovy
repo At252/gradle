@@ -17,30 +17,107 @@
 package org.gradle.internal.buildtree
 
 import org.gradle.api.internal.GradleInternal
-import org.gradle.composite.internal.IncludedBuildControllers
-import org.gradle.initialization.exception.ExceptionAnalyser
+import org.gradle.composite.internal.IncludedBuildTaskGraph
 import org.gradle.internal.build.BuildLifecycleController
-import org.gradle.test.fixtures.work.TestWorkerLeaseService
+import org.gradle.internal.build.BuildToolingModelAction
+import org.gradle.internal.build.ExecutionResult
 import spock.lang.Specification
 
-import java.util.function.Function
+import java.util.function.Consumer
+import java.util.function.Supplier
 
 class DefaultBuildTreeLifecycleControllerTest extends Specification {
     def gradle = Mock(GradleInternal)
     def buildController = Mock(BuildLifecycleController)
-    def workerLeaseService = new TestWorkerLeaseService()
-    def workController = Mock(BuildTreeWorkExecutor)
-    def includedBuildController = Mock(IncludedBuildControllers)
-    def exceptionAnalyzer = Mock(ExceptionAnalyser)
-    def controller = new DefaultBuildTreeLifecycleController(buildController, workerLeaseService, workController, includedBuildController, exceptionAnalyzer)
+    def taskGraph = Mock(IncludedBuildTaskGraph)
+    def workPreparer = Mock(BuildTreeWorkPreparer)
+    def workExecutor = Mock(BuildTreeWorkExecutor)
+    def modelCreator = Mock(BuildTreeModelCreator)
+    def finishExecutor = Mock(BuildTreeFinishExecutor)
+    def controller = new DefaultBuildTreeLifecycleController(buildController, taskGraph, workPreparer, workExecutor, modelCreator, finishExecutor)
     def reportableFailure = new RuntimeException()
 
     def setup() {
         buildController.gradle >> gradle
     }
 
-    def "runs action after running tasks"() {
-        def action = Mock(Function)
+    def "runs tasks"() {
+        when:
+        controller.scheduleAndRunTasks()
+
+        then:
+        1 * taskGraph.withNewTaskGraph(_) >> { Supplier supplier -> supplier.get() }
+
+        and:
+        1 * workPreparer.scheduleRequestedTasks()
+        1 * workExecutor.execute() >> ExecutionResult.succeeded()
+
+        and:
+        1 * finishExecutor.finishBuildTree([]) >> null
+    }
+
+    def "runs tasks and collects failure to schedule tasks"() {
+        def failure = new RuntimeException()
+
+        when:
+        controller.scheduleAndRunTasks()
+
+        then:
+        def e = thrown(RuntimeException)
+        e == reportableFailure
+
+        and:
+        1 * taskGraph.withNewTaskGraph(_) >> { Supplier supplier -> supplier.get() }
+
+        and:
+        1 * workPreparer.scheduleRequestedTasks() >> { throw failure }
+
+        and:
+        1 * finishExecutor.finishBuildTree([failure]) >> reportableFailure
+    }
+
+    def "runs tasks and collects failure to execute tasks"() {
+        def failure = new RuntimeException()
+
+        when:
+        controller.scheduleAndRunTasks()
+
+        then:
+        def e = thrown(RuntimeException)
+        e == reportableFailure
+
+        and:
+        1 * taskGraph.withNewTaskGraph(_) >> { Supplier supplier -> supplier.get() }
+
+        and:
+        1 * workPreparer.scheduleRequestedTasks()
+        1 * workExecutor.execute() >> ExecutionResult.failed(failure)
+
+        and:
+        1 * finishExecutor.finishBuildTree([failure]) >> reportableFailure
+    }
+
+    def "runs tasks and throws failure to finish build"() {
+        when:
+        controller.scheduleAndRunTasks()
+
+        then:
+        def e = thrown(RuntimeException)
+        e == reportableFailure
+
+        and:
+        1 * taskGraph.withNewTaskGraph(_) >> { Supplier supplier -> supplier.get() }
+
+        and:
+        1 * workPreparer.scheduleRequestedTasks()
+        1 * workExecutor.execute() >> ExecutionResult.succeeded()
+
+        and:
+        1 * finishExecutor.finishBuildTree([]) >> reportableFailure
+    }
+
+    def "runs action after running tasks when task execution is requested"() {
+        def action = Mock(BuildToolingModelAction)
 
         when:
         def result = controller.fromBuildModel(true, action)
@@ -49,19 +126,19 @@ class DefaultBuildTreeLifecycleControllerTest extends Specification {
         result == "result"
 
         and:
-        1 * buildController.scheduleRequestedTasks()
-        1 * workController.execute(_)
+        1 * taskGraph.withNewTaskGraph(_) >> { Supplier supplier -> supplier.get() }
+        1 * workPreparer.scheduleRequestedTasks()
+        1 * workExecutor.execute() >> ExecutionResult.succeeded()
 
         and:
-        1 * action.apply(gradle) >> "result"
+        1 * modelCreator.fromBuildModel(action) >> "result"
 
         and:
-        1 * includedBuildController.finishBuild(_)
-        1 * buildController.finishBuild(null, _)
+        1 * finishExecutor.finishBuildTree([]) >> null
     }
 
     def "does not run action if task execution fails"() {
-        def action = Mock(Function)
+        def action = Mock(BuildToolingModelAction)
         def failure = new RuntimeException()
 
         when:
@@ -72,18 +149,17 @@ class DefaultBuildTreeLifecycleControllerTest extends Specification {
         e == reportableFailure
 
         and:
-        1 * buildController.scheduleRequestedTasks()
-        1 * workController.execute(_) >> { throw failure }
+        1 * taskGraph.withNewTaskGraph(_) >> { Supplier supplier -> supplier.get() }
+        1 * workPreparer.scheduleRequestedTasks()
+        1 * workExecutor.execute() >> ExecutionResult.failed(failure)
         0 * action._
 
         and:
-        1 * includedBuildController.finishBuild(_)
-        1 * buildController.finishBuild(_, _)
-        _ * exceptionAnalyzer.transform([failure]) >> reportableFailure
+        1 * finishExecutor.finishBuildTree([failure]) >> reportableFailure
     }
 
-    def "runs action after configuring build model"() {
-        def action = Mock(Function)
+    def "runs action when tasks are not requested"() {
+        def action = Mock(BuildToolingModelAction)
 
         when:
         def result = controller.fromBuildModel(false, action)
@@ -92,34 +168,63 @@ class DefaultBuildTreeLifecycleControllerTest extends Specification {
         result == "result"
 
         and:
-        1 * buildController.configuredBuild >> gradle
+        1 * modelCreator.fromBuildModel(action) >> "result"
 
         and:
-        1 * action.apply(gradle) >> "result"
-
-        and:
-        1 * includedBuildController.finishBuild(_)
-        1 * buildController.finishBuild(null, _)
+        1 * finishExecutor.finishBuildTree([]) >> null
     }
 
-    def "does not run action if configuration fails"() {
-        def action = Mock(Function)
+    def "collects failure to create model"() {
         def failure = new RuntimeException()
 
         when:
-        controller.fromBuildModel(false, action)
+        controller.fromBuildModel(false, Stub(BuildToolingModelAction))
 
         then:
         def e = thrown(RuntimeException)
         e == reportableFailure
 
         and:
-        1 * buildController.configuredBuild >> { throw failure }
-        0 * action._
+        1 * modelCreator.fromBuildModel(_) >> { throw failure }
 
         and:
-        1 * includedBuildController.finishBuild(_)
-        1 * buildController.finishBuild(_, _)
-        _ * exceptionAnalyzer.transform([failure]) >> reportableFailure
+        1 * finishExecutor.finishBuildTree([failure]) >> reportableFailure
+    }
+
+    def "can run action against model prior to invoking build"() {
+        def action = Mock(Consumer)
+
+        when:
+        controller.beforeBuild(action)
+
+        then:
+        1 * action.accept(gradle)
+        0 * action._
+    }
+
+    def "cannot run action against model once build has started"() {
+        def action = Mock(Consumer)
+        def modelAction = Mock(BuildToolingModelAction)
+
+        given:
+        _ * modelCreator.fromBuildModel(modelAction) >> {
+            controller.beforeBuild(action)
+        }
+
+        when:
+        controller.fromBuildModel(false, modelAction)
+
+        then:
+        1 * finishExecutor.finishBuildTree(_) >> { args ->
+            throw args[0][0]
+        }
+
+        thrown(IllegalStateException)
+
+        when:
+        controller.beforeBuild(action)
+
+        then:
+        thrown(IllegalStateException)
     }
 }

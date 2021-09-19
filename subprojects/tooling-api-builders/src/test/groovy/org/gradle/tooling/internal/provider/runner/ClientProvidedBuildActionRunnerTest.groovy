@@ -16,14 +16,12 @@
 
 package org.gradle.tooling.internal.provider.runner
 
-
 import org.gradle.api.internal.GradleInternal
 import org.gradle.api.internal.StartParameterInternal
-import org.gradle.initialization.BuildCancellationToken
+import org.gradle.internal.build.BuildToolingModelAction
+import org.gradle.internal.build.BuildToolingModelController
 import org.gradle.internal.build.event.BuildEventSubscriptions
 import org.gradle.internal.buildtree.BuildTreeLifecycleController
-import org.gradle.internal.operations.BuildOperationExecutor
-import org.gradle.internal.resources.ProjectLeaseRegistry
 import org.gradle.tooling.internal.protocol.InternalBuildAction
 import org.gradle.tooling.internal.protocol.InternalBuildActionFailureException
 import org.gradle.tooling.internal.protocol.InternalBuildActionVersion2
@@ -44,26 +42,29 @@ class ClientProvidedBuildActionRunnerTest extends Specification {
     def buildController = Mock(BuildTreeLifecycleController) {
         getGradle() >> this.gradle
     }
+    def toolingModelController = Stub(BuildToolingModelController)
     def clientProvidedBuildAction = new ClientProvidedBuildAction(startParameter, action, false /* isRunTasks */, clientSubscriptions)
-    def runner = new ClientProvidedBuildActionRunner(Stub(BuildCancellationToken), Stub(BuildOperationExecutor), Stub(ProjectLeaseRegistry), payloadSerializer)
+    def runner = new ClientProvidedBuildActionRunner(Stub(BuildControllerFactory), payloadSerializer)
 
     def "can run action and returns result when completed"() {
         given:
         def model = new Object()
+        def serialized = Stub(SerializedPayload)
         def internalAction = Mock(InternalBuildAction)
 
         when:
         def result = runner.run(clientProvidedBuildAction, buildController)
 
         then:
-        result.clientResult == model
+        result.clientResult == serialized
         result.buildFailure == null
         result.clientFailure == null
 
         and:
-        1 * buildController.fromBuildModel(false, _) >> { Boolean b, Function function -> function.apply(gradle) }
-        1 * internalAction.execute(_) >> model
         1 * payloadSerializer.deserialize(action) >> internalAction
+        1 * buildController.fromBuildModel(false, _) >> { Boolean b, BuildToolingModelAction modelAction -> modelAction.fromBuildModel(toolingModelController) }
+        1 * internalAction.execute(_) >> model
+        1 * payloadSerializer.serialize(model) >> serialized
     }
 
     def "can run action and reports failure"() {
@@ -82,7 +83,7 @@ class ClientProvidedBuildActionRunnerTest extends Specification {
 
         and:
         1 * payloadSerializer.deserialize(action) >> internalAction
-        1 * buildController.fromBuildModel(false, _) >> { Boolean b, Function function -> function.apply(gradle) }
+        1 * buildController.fromBuildModel(false, _) >> { Boolean b, BuildToolingModelAction modelAction -> modelAction.fromBuildModel(toolingModelController) }
         1 * internalAction.execute(_) >> { throw failure }
     }
 
@@ -121,18 +122,20 @@ class ClientProvidedBuildActionRunnerTest extends Specification {
         given:
         def model = new Object()
         def internalAction = Mock(InternalBuildActionVersion2)
+        def serializedResult = Stub(SerializedPayload)
 
         when:
         def result = runner.run(clientProvidedBuildAction, buildController)
 
         then:
-        result.clientResult == model
+        result.clientResult == serializedResult
         result.buildFailure == null
         result.clientFailure == null
 
         and:
-        1 * buildController.fromBuildModel(false, _) >> { Boolean b, Function function -> function.apply(gradle) }
-        1 * internalAction.execute(_) >> model
         1 * payloadSerializer.deserialize(action) >> internalAction
+        1 * buildController.fromBuildModel(false, _) >> { Boolean b, BuildToolingModelAction modelAction -> modelAction.fromBuildModel(toolingModelController) }
+        1 * internalAction.execute(_) >> model
+        1 * payloadSerializer.serialize(model) >> serializedResult
     }
 }

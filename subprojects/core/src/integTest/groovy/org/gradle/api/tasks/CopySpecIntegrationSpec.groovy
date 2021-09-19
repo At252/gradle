@@ -16,7 +16,7 @@
 
 package org.gradle.api.tasks
 
-import groovy.transform.NotYetImplemented
+import groovy.test.NotYetImplemented
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 import org.gradle.integtests.fixtures.TestResources
 import org.gradle.util.Requires
@@ -221,7 +221,7 @@ class CopySpecIntegrationSpec extends AbstractIntegrationSpec {
 
     @Requires(TestPrecondition.UNIX_DERIVATIVE)
     @Issue("https://github.com/gradle/gradle/issues/2552")
-    def "can copy files to output with named pipes"() {
+    def "copying files to a directory with named pipes causes a deprecation warning"() {
         def input = file("input.txt").createFile()
 
         def outputDirectory = file("output").createDir()
@@ -235,9 +235,24 @@ class CopySpecIntegrationSpec extends AbstractIntegrationSpec {
         """
 
         when:
+        executer.expectDeprecationWarning("Cannot access a file in the destination directory (see --info log for details). " +
+            "Copying to a directory which contains unreadable content has been deprecated. " +
+            "This will fail with an error in Gradle 8.0. " +
+            "Use the method Copy.ignoreExistingContentInDestinationDir().")
         run "copy"
         then:
         outputDirectory.list().contains input.name
+        executedAndNotSkipped(":copy")
+
+        when:
+        executer.expectDeprecationWarning("Cannot access a file in the destination directory (see --info log for details). " +
+            "Copying to a directory which contains unreadable content has been deprecated. " +
+            "This will fail with an error in Gradle 8.0. " +
+            "Use the method Copy.ignoreExistingContentInDestinationDir().")
+        run "copy"
+        then:
+        outputDirectory.list().contains input.name
+        executedAndNotSkipped(":copy")
 
         cleanup:
         pipe.delete()

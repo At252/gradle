@@ -26,12 +26,13 @@ import org.gradle.internal.classpath.DefaultClassPath
 import org.gradle.internal.execution.ExecutionEngine
 import org.gradle.internal.execution.UnitOfWork
 import org.gradle.internal.execution.fingerprint.InputFingerprinter
-import org.gradle.internal.execution.fingerprint.InputFingerprinter.InputVisitor
 import org.gradle.internal.execution.fingerprint.InputFingerprinter.FileValueSupplier
 import org.gradle.internal.execution.fingerprint.InputFingerprinter.InputPropertyType.NON_INCREMENTAL
+import org.gradle.internal.execution.fingerprint.InputFingerprinter.InputVisitor
 import org.gradle.internal.file.TreeType.DIRECTORY
 import org.gradle.internal.fingerprint.CurrentFileCollectionFingerprint
 import org.gradle.internal.fingerprint.DirectorySensitivity
+import org.gradle.internal.fingerprint.LineEndingSensitivity
 import org.gradle.internal.hash.HashCode
 import org.gradle.internal.hash.Hasher
 import org.gradle.internal.hash.Hashing
@@ -163,7 +164,8 @@ class GenerateProjectAccessors(
             FileValueSupplier(
                 classPath,
                 ClasspathNormalizer::class.java,
-                DirectorySensitivity.IGNORE_DIRECTORIES
+                DirectorySensitivity.IGNORE_DIRECTORIES,
+                LineEndingSensitivity.DEFAULT,
             ) { fileCollectionFactory.fixed(classPath.asFiles) }
         )
     }

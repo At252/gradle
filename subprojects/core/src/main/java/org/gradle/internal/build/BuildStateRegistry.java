@@ -18,11 +18,13 @@ package org.gradle.internal.build;
 
 import org.gradle.api.artifacts.component.BuildIdentifier;
 import org.gradle.api.internal.BuildDefinition;
+import org.gradle.internal.buildtree.NestedBuildTree;
 import org.gradle.internal.service.scopes.Scopes;
 import org.gradle.internal.service.scopes.ServiceScope;
 
 import javax.annotation.Nullable;
 import java.util.Collection;
+import java.util.function.Consumer;
 
 /**
  * A registry of all the builds present in a build tree.
@@ -97,14 +99,20 @@ public interface BuildStateRegistry {
     IncludedBuildState addImplicitIncludedBuild(BuildDefinition buildDefinition);
 
     /**
-     * Creates a standalone nested build.
+     * Locates the buildSrc build for the given build, if present. Returns null if the given build does not have an associated buildSrc build.
      */
-    StandAloneNestedBuild addBuildSrcNestedBuild(BuildDefinition buildDefinition, BuildState owner);
+    @Nullable
+    StandAloneNestedBuild getBuildSrcNestedBuild(BuildState owner);
 
     /**
      * Creates a new standalone nested build tree.
      */
-    NestedRootBuild addNestedBuildTree(BuildDefinition buildDefinition, BuildState owner, @Nullable String buildName);
+    NestedBuildTree addNestedBuildTree(BuildDefinition buildDefinition, BuildState owner, @Nullable String buildName);
+
+    /**
+     * Visits all registered builds, ordered by {@link BuildState#getIdentityPath()}
+     */
+    void visitBuilds(Consumer<? super BuildState> visitor);
 
     /**
      * Register dependency substitutions for the root build itself. This way, the projects of the root build can be addressed by coordinates as the projects of all other builds.

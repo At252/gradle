@@ -16,19 +16,24 @@
 
 package org.gradle.internal.build;
 
-import org.gradle.api.artifacts.component.BuildIdentifier;
-import org.gradle.api.artifacts.component.ProjectComponentIdentifier;
-import org.gradle.api.internal.artifacts.DefaultProjectComponentIdentifier;
-import org.gradle.api.internal.project.ProjectState;
+import org.gradle.api.internal.SettingsInternal;
 import org.gradle.api.internal.project.ProjectStateRegistry;
-import org.gradle.initialization.DefaultProjectDescriptor;
+import org.gradle.execution.taskgraph.TaskExecutionGraphInternal;
 import org.gradle.initialization.IncludedBuildSpec;
-import org.gradle.util.Path;
+import org.gradle.internal.Describables;
+import org.gradle.internal.DisplayName;
+
+import java.util.function.Consumer;
 
 public abstract class AbstractBuildState implements BuildState {
     @Override
+    public DisplayName getDisplayName() {
+        return Describables.of(getBuildIdentifier());
+    }
+
+    @Override
     public String toString() {
-        return getBuildIdentifier().toString();
+        return getDisplayName().getDisplayName();
     }
 
     @Override
@@ -36,22 +41,39 @@ public abstract class AbstractBuildState implements BuildState {
         throw new UnsupportedOperationException("Cannot include build '" + includedBuildSpec.rootDir.getName() + "' in " + getBuildIdentifier() + ". This is not supported yet.");
     }
 
+    @Override
+    public boolean isImportableBuild() {
+        return true;
+    }
+
     protected abstract ProjectStateRegistry getProjectStateRegistry();
 
     @Override
-    public ProjectState getProject(Path projectPath) {
-        return getProjectStateRegistry().stateFor(getBuildIdentifier(), projectPath);
+    public BuildProjectRegistry getProjects() {
+        return getProjectStateRegistry().projectsFor(getBuildIdentifier());
+    }
+
+    protected abstract BuildLifecycleController getBuildController();
+
+    @Override
+    public void ensureProjectsLoaded() {
+        getBuildController().getLoadedSettings();
     }
 
     @Override
-    public ProjectComponentIdentifier getIdentifierForProject(Path projectPath) {
-        BuildIdentifier buildIdentifier = getBuildIdentifier();
-        Path identityPath = getIdentityPathForProject(projectPath);
-        DefaultProjectDescriptor project = getLoadedSettings().getProjectRegistry().getProject(projectPath.getPath());
-        if (project == null) {
-            throw new IllegalArgumentException("Project " + projectPath + " not found.");
-        }
-        String name = project.getName();
-        return new DefaultProjectComponentIdentifier(buildIdentifier, identityPath, projectPath, name);
+    public void ensureProjectsConfigured() {
+        getBuildController().getConfiguredBuild();
+    }
+
+    @Override
+    public SettingsInternal getLoadedSettings() throws IllegalStateException {
+        return getBuildController().getLoadedSettings();
+    }
+
+    @Override
+    public void populateWorkGraph(Consumer<? super TaskExecutionGraphInternal> action) {
+        BuildLifecycleController buildController = getBuildController();
+        buildController.prepareToScheduleTasks();
+        buildController.populateWorkGraph(action);
     }
 }

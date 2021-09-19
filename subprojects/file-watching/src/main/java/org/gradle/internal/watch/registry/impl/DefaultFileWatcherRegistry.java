@@ -49,7 +49,7 @@ import static org.gradle.internal.watch.registry.FileWatcherRegistry.Type.REMOVE
 public class DefaultFileWatcherRegistry implements FileWatcherRegistry {
     private static final Logger LOGGER = LoggerFactory.getLogger(DefaultFileWatcherRegistry.class);
 
-    private final AbstractFileEventFunctions fileEventFunctions;
+    private final AbstractFileEventFunctions<?> fileEventFunctions;
     private final FileWatcher watcher;
     private final BlockingQueue<FileWatchEvent> fileEvents;
     private final Thread eventConsumerThread;
@@ -60,7 +60,7 @@ public class DefaultFileWatcherRegistry implements FileWatcherRegistry {
     private volatile boolean stopping = false;
 
     public DefaultFileWatcherRegistry(
-        AbstractFileEventFunctions fileEventFunctions,
+        AbstractFileEventFunctions<?> fileEventFunctions,
         FileWatcher watcher,
         ChangeHandler handler,
         FileWatcherUpdater fileWatcherUpdater,
@@ -148,8 +148,13 @@ public class DefaultFileWatcherRegistry implements FileWatcherRegistry {
     }
 
     @Override
-    public SnapshotHierarchy buildFinished(SnapshotHierarchy root, WatchMode watchMode, int maximumNumberOfWatchedHierarchies) {
-        return fileWatcherUpdater.buildFinished(root, watchMode, maximumNumberOfWatchedHierarchies);
+    public SnapshotHierarchy updateVfsOnBuildStarted(SnapshotHierarchy root, WatchMode watchMode) {
+        return fileWatcherUpdater.updateVfsOnBuildStarted(root, watchMode);
+    }
+
+    @Override
+    public SnapshotHierarchy updateVfsOnBuildFinished(SnapshotHierarchy root, WatchMode watchMode, int maximumNumberOfWatchedHierarchies) {
+        return fileWatcherUpdater.updateVfsOnBuildFinished(root, watchMode, maximumNumberOfWatchedHierarchies);
     }
 
     private static Type convertType(FileWatchEvent.ChangeType type) {

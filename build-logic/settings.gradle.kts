@@ -16,10 +16,6 @@
 
 pluginManagement {
     repositories {
-        maven {
-            name = "kotlin-eap"
-            url = uri("https://dl.bintray.com/kotlin/kotlin-eap")
-        }
         gradlePluginPortal()
     }
 }
@@ -27,38 +23,24 @@ pluginManagement {
 dependencyResolutionManagement {
     repositories {
         maven {
-            name = "Gradle libs"
-            url = uri("https://repo.gradle.org/gradle/libs")
-            mavenContent {
-                // This repository contains an older version which has been overwritten in Central
-                excludeModule("com.google.j2objc", "j2objc-annotations")
+            name = "Gradle Enterprise release candidates"
+            url = uri("https://repo.gradle.org/gradle/enterprise-libs-release-candidates")
+            content {
+                val rcAndMilestonesPattern = "\\d{1,2}?\\.\\d{1,2}?(\\.\\d{1,2}?)?-((rc-\\d{1,2}?)|(milestone-\\d{1,2}?))"
+                includeVersionByRegex("com.gradle", "gradle-enterprise-gradle-plugin", rcAndMilestonesPattern)
+                includeVersionByRegex("com.gradle.enterprise", "test-distribution-gradle-plugin", rcAndMilestonesPattern)
+                includeVersionByRegex("com.gradle.internal", "test-selection-gradle-plugin", rcAndMilestonesPattern)
             }
         }
+        maven {
+            name = "Gradle public repository"
+            url = uri("https://repo.gradle.org/gradle/public")
+            content {
+                includeModule("classycle", "classycle")
+            }
+        }
+        mavenCentral()
         gradlePluginPortal()
-        maven {
-            name = "Gradle snapshot libs"
-            url = uri("https://repo.gradle.org/gradle/libs-snapshots")
-            mavenContent {
-                // This repository contains an older version which has been overwritten in Central
-                excludeModule("com.google.j2objc", "j2objc-annotations")
-            }
-        }
-        maven {
-            name = "kotlinx"
-            url = uri("https://dl.bintray.com/kotlin/kotlinx")
-        }
-        maven {
-            name = "kotlin-dev"
-            url = uri("https://dl.bintray.com/kotlin/kotlin-dev")
-        }
-        maven {
-            name = "kotlin-eap"
-            url = uri("https://dl.bintray.com/kotlin/kotlin-eap")
-        }
-        maven {
-            name = "ge-release-candidates"
-            url = uri("https://repo.gradle.org/gradle/enterprise-libs-release-candidates-local")
-        }
     }
 }
 

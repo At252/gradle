@@ -17,10 +17,12 @@
 package org.gradle.internal.hash;
 
 import com.google.common.base.Charsets;
-import com.google.common.base.Preconditions;
 import com.google.common.io.ByteStreams;
+import com.google.common.io.Files;
 
-import java.io.OutputStream;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -32,7 +34,8 @@ import java.security.NoSuchAlgorithmException;
  * Inspired by the Google Guava project – https://github.com/google/guava.
  */
 public class Hashing {
-    private Hashing() {}
+    private Hashing() {
+    }
 
     private static final HashFunction MD5 = MessageDigestHashFunction.of("MD5");
 
@@ -90,17 +93,17 @@ public class Hashing {
     }
 
     /**
-     * Creates a {@link HashingOutputStream} with the default hash function.
+     * Hash the contents of the given {@link java.io.InputStream} with the default hash function.
      */
-    public static HashingOutputStream primitiveStreamHasher() {
-        return primitiveStreamHasher(ByteStreams.nullOutputStream());
+    public static HashCode hashStream(InputStream stream) throws IOException {
+        return DEFAULT.hashStream(stream);
     }
 
     /**
-     * Creates a {@link HashingOutputStream} with the default hash function.
+     * Hash the contents of the given {@link java.io.File} with the default hash function.
      */
-    public static HashingOutputStream primitiveStreamHasher(OutputStream output) {
-        return new HashingOutputStream(DEFAULT, output);
+    public static HashCode hashFile(File file) throws IOException {
+        return DEFAULT.hashFile(file);
     }
 
     /**
@@ -186,11 +189,34 @@ public class Hashing {
             return hasher.hash();
         }
 
+        @Override
+        public HashCode hashStream(InputStream stream) throws IOException {
+            HashingOutputStream hashingOutputStream = primitiveStreamHasher();
+            ByteStreams.copy(stream, hashingOutputStream);
+            return hashingOutputStream.hash();
+        }
+
+        @Override
+        public HashCode hashFile(File file) throws IOException {
+            HashingOutputStream hashingOutputStream = primitiveStreamHasher();
+            Files.copy(file, hashingOutputStream);
+            return hashingOutputStream.hash();
+        }
+
+        private HashingOutputStream primitiveStreamHasher() {
+            return new HashingOutputStream(this, ByteStreams.nullOutputStream());
+        }
+
         protected abstract MessageDigest createDigest();
 
         @Override
         public int getHexDigits() {
             return hexDigits;
+        }
+
+        @Override
+        public String toString() {
+            return getAlgorithm();
         }
     }
 
@@ -200,6 +226,11 @@ public class Hashing {
         public CloningMessageDigestHashFunction(MessageDigest prototype, int hashBits) {
             super(hashBits);
             this.prototype = prototype;
+        }
+
+        @Override
+        public String getAlgorithm() {
+            return prototype.getAlgorithm();
         }
 
         @Override
@@ -218,6 +249,11 @@ public class Hashing {
         public RegularMessageDigestHashFunction(String algorithm, int hashBits) {
             super(hashBits);
             this.algorithm = algorithm;
+        }
+
+        @Override
+        public String getAlgorithm() {
+            return algorithm;
         }
 
         @Override
@@ -317,7 +353,6 @@ public class Hashing {
 
     private static class DefaultHasher implements Hasher {
         private final PrimitiveHasher hasher;
-        private String invalidReason;
 
         public DefaultHasher(PrimitiveHasher unsafeHasher) {
             this.hasher = unsafeHasher;
@@ -388,25 +423,7 @@ public class Hashing {
         }
 
         @Override
-        public void markAsInvalid(String invalidReason) {
-            this.invalidReason = invalidReason;
-        }
-
-        @Override
-        public boolean isValid() {
-            return invalidReason == null;
-        }
-
-        @Override
-        public String getInvalidReason() {
-            return Preconditions.checkNotNull(invalidReason);
-        }
-
-        @Override
         public HashCode hash() {
-            if (!isValid()) {
-                throw new IllegalStateException("Hash is invalid: " + getInvalidReason());
-            }
             return hasher.hash();
         }
     }

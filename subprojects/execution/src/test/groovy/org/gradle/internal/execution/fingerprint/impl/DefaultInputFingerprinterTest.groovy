@@ -19,15 +19,17 @@ package org.gradle.internal.execution.fingerprint.impl
 import com.google.common.collect.ImmutableSortedMap
 import org.gradle.api.file.FileCollection
 import org.gradle.api.tasks.FileNormalizer
-import org.gradle.internal.execution.UnitOfWork
 import org.gradle.internal.execution.fingerprint.FileCollectionFingerprinter
 import org.gradle.internal.execution.fingerprint.FileCollectionFingerprinterRegistry
 import org.gradle.internal.execution.fingerprint.FileNormalizationSpec
+import org.gradle.internal.execution.fingerprint.InputFingerprinter
 import org.gradle.internal.execution.fingerprint.InputFingerprinter.FileValueSupplier
 import org.gradle.internal.execution.fingerprint.InputFingerprinter.InputVisitor
 import org.gradle.internal.execution.fingerprint.InputFingerprinter.Result
 import org.gradle.internal.fingerprint.CurrentFileCollectionFingerprint
 import org.gradle.internal.fingerprint.DirectorySensitivity
+import org.gradle.internal.fingerprint.FileCollectionFingerprint
+import org.gradle.internal.fingerprint.LineEndingSensitivity
 import org.gradle.internal.snapshot.ValueSnapshot
 import org.gradle.internal.snapshot.ValueSnapshotter
 import spock.lang.Specification
@@ -37,7 +39,6 @@ import java.util.function.Consumer
 import static org.gradle.internal.execution.fingerprint.InputFingerprinter.InputPropertyType.NON_INCREMENTAL
 
 class DefaultInputFingerprinterTest extends Specification {
-    def work = Mock(UnitOfWork)
     def fingerprinter = Mock(FileCollectionFingerprinter)
     def fingerprinterRegistry = Stub(FileCollectionFingerprinterRegistry) {
         getFingerprinter(_ as FileNormalizationSpec) >> fingerprinter
@@ -57,12 +58,12 @@ class DefaultInputFingerprinterTest extends Specification {
             visitor.visitInputFileProperty(
                 "file",
                 NON_INCREMENTAL,
-                new FileValueSupplier(fileInput, FileNormalizer, DirectorySensitivity.DEFAULT, { fileInput }))
+                new FileValueSupplier(fileInput, FileNormalizer, DirectorySensitivity.DEFAULT, LineEndingSensitivity.DEFAULT, { fileInput }))
         }
 
         then:
         1 * valueSnapshotter.snapshot(input) >> inputSnapshot
-        1 * fingerprinter.fingerprint(fileInput) >> fileInputFingerprint
+        1 * fingerprinter.fingerprint(fileInput, null) >> fileInputFingerprint
         0 * _
 
         then:
@@ -74,6 +75,7 @@ class DefaultInputFingerprinterTest extends Specification {
         when:
         def result = fingerprintInputProperties(
             ImmutableSortedMap.of(),
+            ImmutableSortedMap.of(),
             ImmutableSortedMap.of("input", inputSnapshot),
             ImmutableSortedMap.of("file", fileInputFingerprint)
         ) { visitor ->
@@ -81,7 +83,7 @@ class DefaultInputFingerprinterTest extends Specification {
             visitor.visitInputFileProperty(
                 "file",
                 NON_INCREMENTAL,
-                new FileValueSupplier(fileInput, FileNormalizer, DirectorySensitivity.DEFAULT, { throw new RuntimeException("Shouldn't evaluate this") }))
+                new FileValueSupplier(fileInput, FileNormalizer, DirectorySensitivity.DEFAULT, LineEndingSensitivity.DEFAULT, { throw new RuntimeException("Shouldn't evaluate this") }))
         }
 
         then:
@@ -109,12 +111,54 @@ class DefaultInputFingerprinterTest extends Specification {
         result.fileFingerprints as Map == [:]
     }
 
+    def "reports value snapshotting problem"() {
+        def failure = new RuntimeException("Error")
+        def input = "failing-value"
+
+        when:
+        fingerprintInputProperties { visitor ->
+            visitor.visitInputProperty("input") { input }
+        }
+
+        then:
+        1 * valueSnapshotter.snapshot(input) >> { throw failure }
+        0 * _
+
+        then:
+        def ex = thrown InputFingerprinter.InputFingerprintingException
+        ex.message == "Cannot fingerprint input property 'input': value 'failing-value' cannot be serialized."
+        ex.propertyName == "input"
+        ex.cause == failure
+    }
+
+    def "reports file snapshotting problem"() {
+        def failure = new UncheckedIOException(new IOException("Error"))
+        when:
+        fingerprintInputProperties { visitor ->
+            visitor.visitInputFileProperty(
+                "file",
+                NON_INCREMENTAL,
+                new FileValueSupplier(fileInput, FileNormalizer, DirectorySensitivity.DEFAULT, LineEndingSensitivity.DEFAULT, { fileInput }))
+        }
+
+        then:
+        1 * fingerprinter.fingerprint(fileInput, null) >> { throw failure }
+        0 * _
+
+        then:
+        def ex = thrown InputFingerprinter.InputFileFingerprintingException
+        ex.message == "Cannot fingerprint input file property 'file'."
+        ex.propertyName == "file"
+        ex.cause == failure
+    }
+
     private Result fingerprintInputProperties(
         ImmutableSortedMap<String, ValueSnapshot> previousValueSnapshots = ImmutableSortedMap.of(),
-        ImmutableSortedMap<String, ValueSnapshot> knownValueSnapshots = ImmutableSortedMap.of(),
-        ImmutableSortedMap<String, CurrentFileCollectionFingerprint> knownFingerprints = ImmutableSortedMap.of(),
+        ImmutableSortedMap<String, FileCollectionFingerprint> previousFingerprints = ImmutableSortedMap.of(),
+        ImmutableSortedMap<String, ValueSnapshot> knownCurrentValueSnapshots = ImmutableSortedMap.of(),
+        ImmutableSortedMap<String, CurrentFileCollectionFingerprint> knownCurrentFingerprints = ImmutableSortedMap.of(),
         Consumer<InputVisitor> inputs
     ) {
-        inputFingerprinter.fingerprintInputProperties(previousValueSnapshots, knownValueSnapshots, knownFingerprints, inputs)
+        inputFingerprinter.fingerprintInputProperties(previousValueSnapshots, previousFingerprints, knownCurrentValueSnapshots, knownCurrentFingerprints, inputs)
     }
 }

@@ -18,31 +18,32 @@ package org.gradle.configurationcache
 
 import org.gradle.api.internal.BuildDefinition
 import org.gradle.cache.CacheBuilder
-import org.gradle.cache.CacheRepository
 import org.gradle.cache.FileLockManager
 import org.gradle.cache.PersistentCache
 import org.gradle.cache.internal.CleanupActionFactory
 import org.gradle.cache.internal.LeastRecentlyUsedCacheCleanup
 import org.gradle.cache.internal.SingleDepthFilesFinder
 import org.gradle.cache.internal.filelock.LockOptionsBuilder
+import org.gradle.cache.scopes.BuildTreeScopedCache
 import org.gradle.configurationcache.extensions.unsafeLazy
-import org.gradle.configurationcache.initialization.ConfigurationCacheStartParameter
 import org.gradle.internal.Factory
 import org.gradle.internal.concurrent.Stoppable
 import org.gradle.internal.file.FileAccessTimeJournal
 import org.gradle.internal.file.impl.SingleDepthFileAccessTracker
 import org.gradle.internal.nativeintegration.filesystem.FileSystem
+import org.gradle.internal.service.scopes.Scopes
+import org.gradle.internal.service.scopes.ServiceScope
 import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
 
 
+@ServiceScope(Scopes.BuildTree::class)
 internal
 class ConfigurationCacheRepository(
-    cacheRepository: CacheRepository,
+    cacheRepository: BuildTreeScopedCache,
     cacheCleanupFactory: CleanupActionFactory,
     private val fileAccessTimeJournal: FileAccessTimeJournal,
-    private val startParameter: ConfigurationCacheStartParameter,
     private val fileSystem: FileSystem
 ) : Stoppable {
 
@@ -69,22 +70,22 @@ class ConfigurationCacheRepository(
         class Invalid(val reason: String) : CheckedFingerprint()
     }
 
-    fun useForStateLoad(cacheKey: String, action: (ConfigurationCacheStateFile) -> Unit) {
-        withBaseCacheDirFor(cacheKey) { cacheDir ->
+    fun <T> useForStateLoad(cacheKey: String, stateType: StateType, action: (ConfigurationCacheStateFile) -> T): T {
+        return withBaseCacheDirFor(cacheKey) { cacheDir ->
             action(
-                ReadableConfigurationCacheStateFile(cacheDir.stateFile)
+                ReadableConfigurationCacheStateFile(cacheDir.stateFile(stateType))
             )
         }
     }
 
-    fun useForStore(cacheKey: String, action: (Layout) -> Unit) {
+    fun useForStore(cacheKey: String, stateType: StateType, action: (Layout) -> Unit) {
         withBaseCacheDirFor(cacheKey) { cacheDir ->
             // TODO GlobalCache require(!cacheDir.isDirectory)
             cacheDir.mkdirs()
             chmod(cacheDir, 448) // octal 0700
             markAccessed(cacheDir)
             val stateFiles = mutableListOf<File>()
-            val rootStateFile = WriteableConfigurationCacheStateFile(cacheDir.stateFile, stateFiles::add)
+            val rootStateFile = WriteableConfigurationCacheStateFile(cacheDir.stateFile(stateType), stateFiles::add)
             val layout = Layout(cacheDir.fingerprintFile, rootStateFile)
             try {
                 action(layout)
@@ -157,15 +158,11 @@ class ConfigurationCacheRepository(
 
     private
     val cache = cacheRepository
-        .cache(cacheBaseDir)
+        .crossVersionCache("configuration-cache")
         .withDisplayName("Configuration Cache")
         .withOnDemandLockMode() // Don't need to lock anything until we use the caches
         .withLruCacheCleanup(cacheCleanupFactory)
         .open()
-
-    private
-    val cacheBaseDir
-        get() = startParameter.cacheDir.resolve("configuration-cache")
 
     private
     fun CacheBuilder.withOnDemandLockMode() =
@@ -215,6 +212,5 @@ class ConfigurationCacheRepository(
         get() = resolve("fingerprint.bin")
 
     private
-    val File.stateFile
-        get() = resolve("state.bin")
+    fun File.stateFile(stateType: StateType) = resolve("${stateType.name.toLowerCase()}.bin")
 }

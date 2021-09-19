@@ -58,10 +58,10 @@ import org.gradle.test.fixtures.ResettableExpectations;
 import org.gradle.test.fixtures.file.TestDirectoryProvider;
 import org.gradle.test.fixtures.file.TestFile;
 import org.gradle.testfixtures.internal.NativeServicesTestFixture;
+import org.gradle.util.GradleVersion;
 import org.gradle.util.internal.ClosureBackedAction;
 import org.gradle.util.internal.CollectionUtils;
 import org.gradle.util.internal.GFileUtils;
-import org.gradle.util.GradleVersion;
 import org.gradle.util.internal.TextUtil;
 
 import java.io.File;
@@ -191,7 +191,6 @@ public abstract class AbstractGradleExecuter implements GradleExecuter, Resettab
 
     protected boolean interactive;
 
-    private boolean noExplicitTmpDir;
     protected boolean noExplicitNativeServicesDir;
     private boolean fullDeprecationStackTrace;
     private boolean checkDeprecations = true;
@@ -358,9 +357,6 @@ public abstract class AbstractGradleExecuter implements GradleExecuter, Resettab
 
         if (defaultCharacterEncoding != null) {
             executer.withDefaultCharacterEncoding(defaultCharacterEncoding);
-        }
-        if (noExplicitTmpDir) {
-            executer.withNoExplicitTmpDir();
         }
         if (noExplicitNativeServicesDir) {
             executer.withNoExplicitNativeServicesDir();
@@ -1085,7 +1081,7 @@ public abstract class AbstractGradleExecuter implements GradleExecuter, Resettab
         if (useOwnUserHomeServices || useCustomGradleUserHomeDir) {
             properties.put(REUSE_USER_HOME_SERVICES, "false");
         }
-        if (!noExplicitTmpDir) {
+        if (buildJvmOpts.stream().noneMatch(arg -> arg.startsWith("-Djava.io.tmpdir="))) {
             if (tmpDir == null) {
                 tmpDir = getDefaultTmpDir();
             }
@@ -1224,11 +1220,6 @@ public abstract class AbstractGradleExecuter implements GradleExecuter, Resettab
     @Override
     public GradleExecuter withBuildCacheEnabled() {
         return withArgument("--build-cache");
-    }
-
-    @Override
-    public GradleExecuter withPartialVfsInvalidation(boolean enabled) {
-        return this;
     }
 
     protected Action<ExecutionResult> getResultAssertion() {
@@ -1467,12 +1458,6 @@ public abstract class AbstractGradleExecuter implements GradleExecuter, Resettab
     @Override
     public GradleExecuter withForceInteractive(boolean flag) {
         interactive = flag;
-        return this;
-    }
-
-    @Override
-    public GradleExecuter withNoExplicitTmpDir() {
-        noExplicitTmpDir = true;
         return this;
     }
 

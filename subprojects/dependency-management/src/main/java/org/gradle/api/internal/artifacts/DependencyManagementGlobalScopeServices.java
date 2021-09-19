@@ -71,6 +71,7 @@ import org.gradle.internal.typeconversion.CrossBuildCachingNotationConverter;
 import org.gradle.internal.typeconversion.NotationParser;
 import org.gradle.internal.typeconversion.NotationParserBuilder;
 import org.gradle.work.Incremental;
+import org.gradle.work.NormalizeLineEndings;
 
 class DependencyManagementGlobalScopeServices {
     FileResourceRepository createFileResourceRepository(FileSystem fileSystem) {
@@ -162,7 +163,8 @@ class DependencyManagementGlobalScopeServices {
                 Incremental.class,
                 Optional.class,
                 PathSensitive.class,
-                IgnoreEmptyDirectories.class
+                IgnoreEmptyDirectories.class,
+                NormalizeLineEndings.class
             ),
             instantiationScheme
         );
@@ -185,7 +187,8 @@ class DependencyManagementGlobalScopeServices {
                 Incremental.class,
                 Optional.class,
                 PathSensitive.class,
-                IgnoreEmptyDirectories.class
+                IgnoreEmptyDirectories.class,
+                NormalizeLineEndings.class
             ),
             instantiationScheme
         );

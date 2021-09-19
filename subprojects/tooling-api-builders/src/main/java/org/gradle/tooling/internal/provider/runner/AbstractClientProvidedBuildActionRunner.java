@@ -16,66 +16,40 @@
 
 package org.gradle.tooling.internal.provider.runner;
 
-import org.gradle.api.initialization.IncludedBuild;
-import org.gradle.api.internal.GradleInternal;
-import org.gradle.api.invocation.Gradle;
-import org.gradle.execution.ProjectConfigurer;
-import org.gradle.initialization.BuildCancellationToken;
-import org.gradle.internal.InternalBuildAdapter;
-import org.gradle.internal.build.IncludedBuildState;
+import org.gradle.internal.build.BuildToolingModelAction;
+import org.gradle.internal.build.BuildToolingModelController;
 import org.gradle.internal.buildtree.BuildActionRunner;
 import org.gradle.internal.buildtree.BuildTreeLifecycleController;
-import org.gradle.internal.operations.BuildOperationExecutor;
-import org.gradle.internal.resources.ProjectLeaseRegistry;
 import org.gradle.tooling.internal.protocol.InternalBuildActionFailureException;
 import org.gradle.tooling.internal.protocol.InternalBuildActionVersion2;
 import org.gradle.tooling.internal.protocol.PhasedActionResult;
+import org.gradle.tooling.internal.provider.serialization.PayloadSerializer;
+import org.gradle.tooling.internal.provider.serialization.SerializedPayload;
 
 import javax.annotation.Nullable;
-import java.util.HashSet;
-import java.util.Set;
-import java.util.function.Function;
 
 public abstract class AbstractClientProvidedBuildActionRunner implements BuildActionRunner {
-    private final BuildCancellationToken buildCancellationToken;
-    private final BuildOperationExecutor buildOperationExecutor;
-    private final ProjectLeaseRegistry projectLeaseRegistry;
+    private final BuildControllerFactory buildControllerFactory;
+    private final PayloadSerializer payloadSerializer;
 
-    public AbstractClientProvidedBuildActionRunner(BuildCancellationToken buildCancellationToken, BuildOperationExecutor buildOperationExecutor, ProjectLeaseRegistry projectLeaseRegistry) {
-        this.buildCancellationToken = buildCancellationToken;
-        this.buildOperationExecutor = buildOperationExecutor;
-        this.projectLeaseRegistry = projectLeaseRegistry;
+    public AbstractClientProvidedBuildActionRunner(BuildControllerFactory buildControllerFactory, PayloadSerializer payloadSerializer) {
+        this.buildControllerFactory = buildControllerFactory;
+        this.payloadSerializer = payloadSerializer;
     }
 
     protected Result runClientAction(ClientAction action, BuildTreeLifecycleController buildController) {
-
-        GradleInternal gradle = buildController.getGradle();
-
-        ActionRunningListener listener = new ActionRunningListener(action, buildCancellationToken, buildOperationExecutor, projectLeaseRegistry);
-
+        ActionAdapter adapter = new ActionAdapter(action, payloadSerializer);
         try {
-            gradle.addBuildListener(listener);
-            buildController.fromBuildModel(action.isRunTasks(), listener);
+            ActionResults actionResults = buildController.fromBuildModel(action.isRunTasks(), adapter);
+            // The result may have been cached and the actions not executed; push the results to the client if required
+            adapter.maybeApplyResult(actionResults);
             return Result.of(action.getResult());
         } catch (RuntimeException e) {
             RuntimeException clientFailure = e;
-            if (listener.actionFailure != null) {
-                clientFailure = new InternalBuildActionFailureException(listener.actionFailure);
+            if (adapter.actionFailure != null) {
+                clientFailure = new InternalBuildActionFailureException(adapter.actionFailure);
             }
             return Result.failed(e, clientFailure);
-        }
-    }
-
-    private void forceFullConfiguration(GradleInternal gradle, Set<GradleInternal> alreadyConfigured) {
-        gradle.getServices().get(ProjectConfigurer.class).configureHierarchyFully(gradle.getRootProject());
-        for (IncludedBuild includedBuild : gradle.getIncludedBuilds()) {
-            if (includedBuild instanceof IncludedBuildState) {
-                GradleInternal build = ((IncludedBuildState) includedBuild).getConfiguredBuild();
-                if (!alreadyConfigured.contains(build)) {
-                    alreadyConfigured.add(build);
-                    forceFullConfiguration(build, alreadyConfigured);
-                }
-            }
         }
     }
 
@@ -86,46 +60,71 @@ public abstract class AbstractClientProvidedBuildActionRunner implements BuildAc
         @Nullable
         Object getBuildFinishedAction();
 
-        void collectActionResult(Object result, PhasedActionResult.Phase phase);
+        void collectActionResult(SerializedPayload serializedResult, PhasedActionResult.Phase phase);
+
+        @Nullable
+        SerializedPayload getResult();
 
         boolean isRunTasks();
-
-        Object getResult();
     }
 
-    private class ActionRunningListener extends InternalBuildAdapter implements Function<GradleInternal, Object> {
+    private static class ActionResults {
+        @Nullable
+        final SerializedPayload projectsLoadedResult;
+
+        @Nullable
+        final SerializedPayload buildFinishedResult;
+
+        ActionResults(@Nullable SerializedPayload projectsLoadedResult, @Nullable SerializedPayload buildFinishedResult) {
+            this.projectsLoadedResult = projectsLoadedResult;
+            this.buildFinishedResult = buildFinishedResult;
+        }
+    }
+
+    private class ActionAdapter implements BuildToolingModelAction<ActionResults> {
         private final ClientAction clientAction;
-        private final BuildCancellationToken buildCancellationToken;
-        private final BuildOperationExecutor buildOperationExecutor;
-        private final ProjectLeaseRegistry projectLeaseRegistry;
+        private final PayloadSerializer payloadSerializer;
+        SerializedPayload projectsEvaluatedResult;
+        SerializedPayload buildFinishedResult;
         RuntimeException actionFailure;
+        boolean executed;
 
-        ActionRunningListener(ClientAction clientAction, BuildCancellationToken buildCancellationToken, BuildOperationExecutor buildOperationExecutor, ProjectLeaseRegistry projectLeaseRegistry) {
+        ActionAdapter(ClientAction clientAction, PayloadSerializer payloadSerializer) {
             this.clientAction = clientAction;
-            this.buildCancellationToken = buildCancellationToken;
-            this.buildOperationExecutor = buildOperationExecutor;
-            this.projectLeaseRegistry = projectLeaseRegistry;
+            this.payloadSerializer = payloadSerializer;
         }
 
         @Override
-        public void projectsEvaluated(Gradle gradle) {
-            GradleInternal gradleInternal = (GradleInternal) gradle;
-            forceFullConfiguration(gradleInternal, new HashSet<>());
-            runAction(gradleInternal, clientAction.getProjectsEvaluatedAction(), PhasedActionResult.Phase.PROJECTS_LOADED);
+        public void beforeTasks(BuildToolingModelController controller) {
+            projectsEvaluatedResult = runAction(controller, clientAction.getProjectsEvaluatedAction(), PhasedActionResult.Phase.PROJECTS_LOADED);
         }
 
         @Override
-        public Object apply(GradleInternal gradle) {
-            runAction(gradle, clientAction.getBuildFinishedAction(), PhasedActionResult.Phase.BUILD_FINISHED);
-            return null;
+        public ActionResults fromBuildModel(BuildToolingModelController controller) {
+            buildFinishedResult = runAction(controller, clientAction.getBuildFinishedAction(), PhasedActionResult.Phase.BUILD_FINISHED);
+            executed = true;
+            return new ActionResults(projectsEvaluatedResult, buildFinishedResult);
+        }
+
+        public void maybeApplyResult(ActionResults actionResults) {
+            if (executed) {
+                return;
+            }
+            // Using a cached result
+            if (actionResults.projectsLoadedResult != null) {
+                clientAction.collectActionResult(actionResults.projectsLoadedResult, PhasedActionResult.Phase.PROJECTS_LOADED);
+            }
+            if (actionResults.buildFinishedResult != null) {
+                clientAction.collectActionResult(actionResults.buildFinishedResult, PhasedActionResult.Phase.BUILD_FINISHED);
+            }
         }
 
         @SuppressWarnings("deprecation")
-        private void runAction(GradleInternal gradle, @Nullable Object action, PhasedActionResult.Phase phase) {
+        private SerializedPayload runAction(BuildToolingModelController controller, @Nullable Object action, PhasedActionResult.Phase phase) {
             if (action == null || actionFailure != null) {
-                return;
+                return null;
             }
-            DefaultBuildController internalBuildController = new DefaultBuildController(gradle, buildCancellationToken, buildOperationExecutor, projectLeaseRegistry);
+            DefaultBuildController internalBuildController = buildControllerFactory.controllerFor(controller);
             try {
                 Object result;
                 if (action instanceof InternalBuildActionVersion2<?>) {
@@ -133,7 +132,9 @@ public abstract class AbstractClientProvidedBuildActionRunner implements BuildAc
                 } else {
                     result = ((org.gradle.tooling.internal.protocol.InternalBuildAction) action).execute(internalBuildController);
                 }
-                clientAction.collectActionResult(result, phase);
+                SerializedPayload serializedResult = payloadSerializer.serialize(result);
+                clientAction.collectActionResult(serializedResult, phase);
+                return serializedResult;
             } catch (RuntimeException e) {
                 actionFailure = e;
                 throw e;

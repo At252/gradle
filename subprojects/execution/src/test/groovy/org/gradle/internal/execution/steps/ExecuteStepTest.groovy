@@ -19,7 +19,7 @@ package org.gradle.internal.execution.steps
 import com.google.common.collect.ImmutableSortedMap
 import org.gradle.internal.execution.ExecutionOutcome
 import org.gradle.internal.execution.UnitOfWork
-import org.gradle.internal.execution.history.AfterPreviousExecutionState
+import org.gradle.internal.execution.history.PreviousExecutionState
 import org.gradle.internal.execution.history.changes.InputChangesInternal
 import org.gradle.internal.operations.TestBuildOperationExecutor
 import spock.lang.Unroll
@@ -27,7 +27,7 @@ import spock.lang.Unroll
 class ExecuteStepTest extends StepSpec<InputChangesContext> {
     def workspace = Mock(File)
     def previousOutputs = ImmutableSortedMap.of()
-    def afterPreviousExecutionState = Stub(AfterPreviousExecutionState) {
+    def previousExecutionState = Stub(PreviousExecutionState) {
         getOutputFilesProducedByWork() >> previousOutputs
     }
 
@@ -41,7 +41,7 @@ class ExecuteStepTest extends StepSpec<InputChangesContext> {
 
     def setup() {
         _ * context.getWorkspace() >> workspace
-        _ * context.getAfterPreviousExecutionState() >> Optional.of(afterPreviousExecutionState)
+        _ * context.getPreviousExecutionState() >> Optional.of(previousExecutionState)
     }
 
     @Unroll
@@ -51,12 +51,17 @@ class ExecuteStepTest extends StepSpec<InputChangesContext> {
 
         then:
         result.executionResult.get().outcome == expectedOutcome
+        // Check
+        result.duration.toMillis() >= 100
 
         _ * context.inputChanges >> Optional.empty()
         _ * work.execute({ UnitOfWork.ExecutionRequest executionRequest ->
             executionRequest.workspace == workspace && !executionRequest.inputChanges.present && executionRequest.previouslyProducedOutputs.get() == previousOutputs
-        }) >> Stub(UnitOfWork.WorkOutput) {
-            getDidWork() >> workResult
+        }) >> {
+            sleep 200
+            Stub(UnitOfWork.WorkOutput) {
+                getDidWork() >> workResult
+            }
         }
         0 * _
 
@@ -74,11 +79,15 @@ class ExecuteStepTest extends StepSpec<InputChangesContext> {
         then:
         !result.executionResult.successful
         result.executionResult.failure.get() == failure
+        result.duration.toMillis() >= 100
 
         _ * context.inputChanges >> Optional.empty()
         _ * work.execute({ UnitOfWork.ExecutionRequest executionRequest ->
             executionRequest.workspace == workspace && !executionRequest.inputChanges.present && executionRequest.previouslyProducedOutputs.get() == previousOutputs
-        }) >> { throw failure }
+        }) >> {
+            sleep 200
+            throw failure
+        }
         0 * _
 
         where:

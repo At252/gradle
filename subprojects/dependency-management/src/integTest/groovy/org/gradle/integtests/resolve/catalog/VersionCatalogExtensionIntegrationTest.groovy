@@ -903,7 +903,7 @@ class VersionCatalogExtensionIntegrationTest extends AbstractVersionCatalogInteg
         ]
     }
 
-    def "can use the generated extension to select the test fixtures of a dependency"() {
+    def "can use the generated extension to select the test fixtures of a dependency with and without sub-accessors"() {
         settingsFile << """
             dependencyResolutionManagement {
                 versionCatalogs {
@@ -911,35 +911,41 @@ class VersionCatalogExtensionIntegrationTest extends AbstractVersionCatalogInteg
                         alias("myLib").to("org.gradle.test", "lib").version {
                             require "1.1"
                         }
+                        alias("myLib-subgroup").to("org.gradle.test", "lib.subgroup").version {
+                            require "1.1"
+                        }
                     }
                 }
             }
         """
-        def lib = mavenHttpRepo.module("org.gradle.test", "lib", "1.1")
-            .withModuleMetadata()
-            .variant("testFixturesApiElements", ['org.gradle.usage': 'java-api', 'org.gradle.libraryelements': 'jar']) {
-                capability('org.gradle.test', 'lib-test-fixtures', '1.1')
-                artifact("lib-1.1-test-fixtures.jar")
-            }
-            .variant("testFixturesRuntimeElements", ['org.gradle.usage': 'java-runtime', 'org.gradle.libraryelements': 'jar']) {
-                capability('org.gradle.test', 'lib-test-fixtures', '1.1')
-                artifact("lib-1.1-test-fixtures.jar")
-            }
-            .publish()
+        def publishLib = { String artifactId ->
+            def lib = mavenHttpRepo.module("org.gradle.test", artifactId, "1.1")
+                .withModuleMetadata()
+                .variant("testFixturesApiElements", ['org.gradle.usage': 'java-api', 'org.gradle.libraryelements': 'jar']) {
+                    capability('org.gradle.test', "$artifactId-test-fixtures", '1.1')
+                    artifact("$artifactId-1.1-test-fixtures.jar")
+                }
+                .variant("testFixturesRuntimeElements", ['org.gradle.usage': 'java-runtime', 'org.gradle.libraryelements': 'jar']) {
+                    capability('org.gradle.test', "$artifactId-test-fixtures", '1.1')
+                    artifact("$artifactId-1.1-test-fixtures.jar")
+                }
+                .publish()
+            lib.pom.expectGet()
+            lib.moduleMetadata.expectGet()
+            lib.getArtifact(classifier: 'test-fixtures').expectGet()
+        }
+        publishLib("lib")
+        publishLib("lib.subgroup")
         buildFile << """
             apply plugin: 'java-library'
 
             dependencies {
                 implementation(testFixtures(libs.myLib))
+                implementation(testFixtures(libs.myLib.subgroup))
             }
         """
 
         when:
-        lib.pom.expectGet()
-        lib.moduleMetadata.expectGet()
-        lib.getArtifact(classifier: 'test-fixtures').expectGet()
-
-        then:
         run ':checkDeps'
 
         then:
@@ -952,11 +958,18 @@ class VersionCatalogExtensionIntegrationTest extends AbstractVersionCatalogInteg
                         'org.gradle.libraryelements': 'jar'])
                     artifact(classifier: 'test-fixtures')
                 }
+                module('org.gradle.test:lib.subgroup:1.1') {
+                    variant('testFixturesRuntimeElements', [
+                        'org.gradle.status': 'release',
+                        'org.gradle.usage': 'java-runtime',
+                        'org.gradle.libraryelements': 'jar'])
+                    artifact(classifier: 'test-fixtures')
+                }
             }
         }
     }
 
-    def "can use the generated extension to select the platform variant of a dependency"() {
+    def "can use the generated extension to select the platform variant of a dependency with and without sub-accessors"() {
         settingsFile << """
             dependencyResolutionManagement {
                 versionCatalogs {
@@ -964,24 +977,29 @@ class VersionCatalogExtensionIntegrationTest extends AbstractVersionCatalogInteg
                         alias("myLib").to("org.gradle.test", "lib").version {
                             require "1.1"
                         }
+                        alias("myLib-subgroup").to("org.gradle.test", "lib.subgroup").version {
+                            require "1.1"
+                        }
                     }
                 }
             }
         """
-        def lib = mavenHttpRepo.module("org.gradle.test", "lib", "1.1")
+        mavenHttpRepo.module("org.gradle.test", "lib", "1.1")
             .publish()
+            .pom.expectGet()
+        mavenHttpRepo.module("org.gradle.test", "lib.subgroup", "1.1")
+            .publish()
+            .pom.expectGet()
         buildFile << """
             apply plugin: 'java-library'
 
             dependencies {
                 implementation(platform(libs.myLib))
+                implementation(platform(libs.myLib.subgroup))
             }
         """
 
         when:
-        lib.pom.expectGet()
-
-        then:
         run ':checkDeps'
 
         then:
@@ -994,16 +1012,81 @@ class VersionCatalogExtensionIntegrationTest extends AbstractVersionCatalogInteg
                         'org.gradle.category': 'platform'])
                     noArtifacts()
                 }
+                module('org.gradle.test:lib.subgroup:1.1') {
+                    variant('platform-runtime', [
+                        'org.gradle.status': 'release',
+                        'org.gradle.usage': 'java-runtime',
+                        'org.gradle.category': 'platform'])
+                    noArtifacts()
+                }
             }
         }
     }
 
-    def "can use the generated extension to select a classified dependency"() {
+    @Issue("https://github.com/gradle/gradle/issues/17849")
+    def "can use the generated extension to select the enforced-platform variant of a dependency with and without sub-accessors"() {
         settingsFile << """
             dependencyResolutionManagement {
                 versionCatalogs {
                     libs {
                         alias("myLib").to("org.gradle.test", "lib").version {
+                            require "1.1"
+                        }
+                        alias("myLib-subgroup").to("org.gradle.test", "lib.subgroup").version {
+                            require "1.1"
+                        }
+                    }
+                }
+            }
+        """
+        mavenHttpRepo.module("org.gradle.test", "lib", "1.1")
+            .publish()
+            .pom.expectGet()
+        mavenHttpRepo.module("org.gradle.test", "lib.subgroup", "1.1")
+            .publish()
+            .pom.expectGet()
+        buildFile << """
+            apply plugin: 'java-library'
+
+            dependencies {
+                implementation(enforcedPlatform(libs.myLib))
+                implementation(enforcedPlatform(libs.myLib.subgroup))
+            }
+        """
+
+        when:
+        run ':checkDeps'
+
+        then:
+        resolve.expectGraph {
+            root(":", ":test:") {
+                module('org.gradle.test:lib:1.1') {
+                    variant('enforced-platform-runtime', [
+                        'org.gradle.status': 'release',
+                        'org.gradle.usage': 'java-runtime',
+                        'org.gradle.category': 'enforced-platform'])
+                    noArtifacts()
+                }
+                module('org.gradle.test:lib.subgroup:1.1') {
+                    variant('enforced-platform-runtime', [
+                        'org.gradle.status': 'release',
+                        'org.gradle.usage': 'java-runtime',
+                        'org.gradle.category': 'enforced-platform'])
+                    noArtifacts()
+                }
+            }
+        }
+    }
+
+    def "can use the generated extension to select a classified dependency with and without sub-accessors"() {
+        settingsFile << """
+            dependencyResolutionManagement {
+                versionCatalogs {
+                    libs {
+                        alias("myLib").to("org.gradle.test", "lib").version {
+                            require "1.1"
+                        }
+                        alias("myLib-subgroup").to("org.gradle.test", "lib.subgroup").version {
                             require "1.1"
                         }
                     }
@@ -1012,22 +1095,25 @@ class VersionCatalogExtensionIntegrationTest extends AbstractVersionCatalogInteg
         """
         def lib = mavenHttpRepo.module("org.gradle.test", "lib", "1.1")
             .publish()
-
         lib.getArtifactFile(classifier: 'test-fixtures').bytes = []
+        lib.pom.expectGet()
+        lib.getArtifact(classifier: 'test-fixtures').expectGet()
+        def libSubgroup = mavenHttpRepo.module("org.gradle.test", "lib.subgroup", "1.1")
+            .publish()
+        libSubgroup.getArtifactFile(classifier: 'test-fixtures').bytes = []
+        libSubgroup.pom.expectGet()
+        libSubgroup.getArtifact(classifier: 'test-fixtures').expectGet()
 
         buildFile << """
             apply plugin: 'java-library'
 
             dependencies {
                 implementation(variantOf(libs.myLib) { classifier('test-fixtures') })
+                implementation(variantOf(libs.myLib.subgroup) { classifier('test-fixtures') })
             }
         """
 
         when:
-        lib.pom.expectGet()
-        lib.getArtifact(classifier: 'test-fixtures').expectGet()
-
-        then:
         run ':checkDeps'
 
         then:
@@ -1036,16 +1122,22 @@ class VersionCatalogExtensionIntegrationTest extends AbstractVersionCatalogInteg
                 module('org.gradle.test:lib:1.1') {
                     artifact(classifier: 'test-fixtures')
                 }
+                module('org.gradle.test:lib.subgroup:1.1') {
+                    artifact(classifier: 'test-fixtures')
+                }
             }
         }
     }
 
-    def "can use the generated extension to select an artifact with different type"() {
+    def "can use the generated extension to select an artifact with different type with and without sub-accessors"() {
         settingsFile << """
             dependencyResolutionManagement {
                 versionCatalogs {
                     libs {
                         alias("myLib").to("org.gradle.test", "lib").version {
+                            require "1.1"
+                        }
+                        alias("myLib-subgroup").to("org.gradle.test", "lib.subgroup").version {
                             require "1.1"
                         }
                     }
@@ -1054,22 +1146,26 @@ class VersionCatalogExtensionIntegrationTest extends AbstractVersionCatalogInteg
         """
         def lib = mavenHttpRepo.module("org.gradle.test", "lib", "1.1")
             .publish()
-
         lib.getArtifactFile(type: 'txt').bytes = "test".bytes
+        lib.pom.expectGet()
+        lib.getArtifact(type: 'txt').expectGet()
+        def libSubgroup = mavenHttpRepo.module("org.gradle.test", "lib.subgroup", "1.1")
+            .publish()
+        libSubgroup.getArtifactFile(type: 'txt').bytes = "test".bytes
+        libSubgroup.pom.expectGet()
+        libSubgroup.getArtifact(type: 'txt').expectGet()
+
 
         buildFile << """
             apply plugin: 'java-library'
 
             dependencies {
                 implementation(variantOf(libs.myLib) { artifactType('txt') })
+                implementation(variantOf(libs.myLib.subgroup) { artifactType('txt') })
             }
         """
 
         when:
-        lib.pom.expectGet()
-        lib.getArtifact(type: 'txt').expectGet()
-
-        then:
         run ':checkDeps'
 
         then:
@@ -1078,46 +1174,175 @@ class VersionCatalogExtensionIntegrationTest extends AbstractVersionCatalogInteg
                 module('org.gradle.test:lib:1.1') {
                     artifact(type: 'txt')
                 }
+                module('org.gradle.test:lib.subgroup:1.1') {
+                    artifact(type: 'txt')
+                }
             }
         }
     }
 
-    def "reasonable error message if an alias clashes with a group of dependencies"() {
+    def "supports aliases which also have children"() {
         settingsFile << """
             dependencyResolutionManagement {
                 versionCatalogs {
                     libs {
-                        alias("top").to("org:test:1.0") // would generate libs.top as a Provider<Dependency>
-                        alias("top.bottom").to("org:bottom:1.0") // would generate libs.top as a factory of dependencies
+                        alias("top").to("org:top:1.0")
+                        alias("top.bottom").to("org:bottom:1.0")
                     }
                 }
             }
         """
+        def top = mavenHttpRepo.module("org", "top", "1.0").publish()
+        def bottom = mavenHttpRepo.module("org", "bottom", "1.0").publish()
+        buildFile << """
+            apply plugin: 'java-library'
+
+            dependencies {
+                implementation libs.top
+                implementation libs.top.bottom
+            }
+        """
 
         when:
-        fails ":help"
+        top.pom.expectGet()
+        bottom.pom.expectGet()
+        top.artifact.expectGet()
+        bottom.artifact.expectGet()
 
         then:
-        failure.assertHasCause "Cannot generate top level accessors because it contains both aliases and groups of the same name: [top]"
+        run ':checkDeps'
+
+        then:
+        resolve.expectGraph {
+            root(":", ":test:") {
+                module('org:top:1.0')
+                module('org:bottom:1.0')
+            }
+        }
     }
 
-    def "reasonable error message if an alias clashes with a sub-group of dependencies"() {
+    def "supports aliases which also have children using intermediate leaves"() {
         settingsFile << """
             dependencyResolutionManagement {
                 versionCatalogs {
                     libs {
-                        alias("top.middle").to("org:test:1.0") // would generate libs.top.middle as a Provider<Dependency>
-                        alias("top.middle.bottom").to("org:bottom:1.0") // would generate libs.top.middle as a factory of dependencies
+                        alias("top.middle").to("org:top:1.0")
+                        alias("top.middle.bottom").to("org:bottom:1.0")
                     }
                 }
             }
         """
+        def top = mavenHttpRepo.module("org", "top", "1.0").publish()
+        def bottom = mavenHttpRepo.module("org", "bottom", "1.0").publish()
+        buildFile << """
+            apply plugin: 'java-library'
+
+            dependencies {
+                implementation libs.top.middle
+                implementation libs.top.middle.bottom
+            }
+        """
 
         when:
-        fails ":help"
+        top.pom.expectGet()
+        bottom.pom.expectGet()
+        top.artifact.expectGet()
+        bottom.artifact.expectGet()
 
         then:
-        failure.assertHasCause "Cannot generate accessors for top because it contains both aliases and groups of the same name: [middle]"
+        run ':checkDeps'
+
+        then:
+        resolve.expectGraph {
+            root(":", ":test:") {
+                module('org:top:1.0')
+                module('org:bottom:1.0')
+            }
+        }
+    }
+
+    def "supports aliases which also have children using empty intermediate level"() {
+        settingsFile << """
+            dependencyResolutionManagement {
+                versionCatalogs {
+                    libs {
+                        alias("top").to("org:top:1.0")
+                        alias("top.middle.bottom").to("org:bottom:1.0")
+                    }
+                }
+            }
+        """
+        def top = mavenHttpRepo.module("org", "top", "1.0").publish()
+        def bottom = mavenHttpRepo.module("org", "bottom", "1.0").publish()
+        buildFile << """
+            apply plugin: 'java-library'
+
+            dependencies {
+                implementation libs.top
+                implementation libs.top.middle.bottom
+            }
+        """
+
+        when:
+        top.pom.expectGet()
+        bottom.pom.expectGet()
+        top.artifact.expectGet()
+        bottom.artifact.expectGet()
+
+        then:
+        run ':checkDeps'
+
+        then:
+        resolve.expectGraph {
+            root(":", ":test:") {
+                module('org:top:1.0')
+                module('org:bottom:1.0')
+            }
+        }
+    }
+
+    def "supports aliases which also have children using empty complex intermediate levels (separator = #separator)"() {
+        settingsFile << """
+            dependencyResolutionManagement {
+                versionCatalogs {
+                    libs {
+                        alias("foo${separator}bar${separator}baz${separator}a").to("org:a:1.0")
+                        alias("foo${separator}bar${separator}baz${separator}b").to("org:b:1.0")
+                        alias("foo${separator}bar").to("org:bar:1.0")
+                    }
+                }
+            }
+        """
+        def a = mavenHttpRepo.module("org", "a", "1.0").publish()
+        def bar = mavenHttpRepo.module("org", "bar", "1.0").publish()
+        buildFile << """
+            apply plugin: 'java-library'
+
+            dependencies {
+                implementation libs.foo.bar.baz.a
+                implementation libs.foo.bar
+            }
+        """
+
+        when:
+        a.pom.expectGet()
+        bar.pom.expectGet()
+        a.artifact.expectGet()
+        bar.artifact.expectGet()
+
+        then:
+        run ':checkDeps'
+
+        then:
+        resolve.expectGraph {
+            root(":", ":test:") {
+                module('org:a:1.0')
+                module('org:bar:1.0')
+            }
+        }
+
+        where:
+        separator << ['.', '_', '-']
     }
 
     def "can access all version catalogs with optional API"() {
@@ -1264,26 +1489,94 @@ class VersionCatalogExtensionIntegrationTest extends AbstractVersionCatalogInteg
         }
     }
 
-    def "reasonable error message if a version is both a leaf and a node"() {
+    def "supports versions which also have children"() {
         settingsFile << """
             dependencyResolutionManagement {
                 versionCatalogs {
                     libs {
                         version("my", "1.0")
-                        version("my.nested", "1.1")
+                        version("my.bottom", "1.1")
                     }
                 }
             }
         """
 
+        buildFile """
+            tasks.register("dumpVersions") {
+                doLast {
+                    println "First: \${libs.versions.my.asProvider().get()}"
+                    println "Second: \${libs.versions.my.bottom.get()}"
+                }
+            }
+        """
+
         when:
-        fails 'help'
+        succeeds 'dumpVersions'
 
         then:
-        failureDescriptionContains "Cannot generate accessors for versions because it contains both aliases and groups of the same name: [my]"
+        outputContains """First: 1.0
+Second: 1.1"""
     }
 
-    def "reasonable error message if a bundle is both a leaf and a node"() {
+    def "supports versions which also have children using intermediate leaves"() {
+        settingsFile << """
+            dependencyResolutionManagement {
+                versionCatalogs {
+                    libs {
+                        version("my.middle", "1.0")
+                        version("my.middle.bottom", "1.1")
+                    }
+                }
+            }
+        """
+
+        buildFile """
+            tasks.register("dumpVersions") {
+                doLast {
+                    println "First: \${libs.versions.my.middle.asProvider().get()}"
+                    println "Second: \${libs.versions.my.middle.bottom.get()}"
+                }
+            }
+        """
+
+        when:
+        succeeds 'dumpVersions'
+
+        then:
+        outputContains """First: 1.0
+Second: 1.1"""
+    }
+
+    def "supports versions which also have children using empty intermediate level"() {
+        settingsFile << """
+            dependencyResolutionManagement {
+                versionCatalogs {
+                    libs {
+                        version("my", "1.0")
+                        version("my.middle.bottom", "1.1")
+                    }
+                }
+            }
+        """
+
+        buildFile """
+            tasks.register("dumpVersions") {
+                doLast {
+                    println "First: \${libs.versions.my.asProvider().get()}"
+                    println "Second: \${libs.versions.my.middle.bottom.get()}"
+                }
+            }
+        """
+
+        when:
+        succeeds 'dumpVersions'
+
+        then:
+        outputContains """First: 1.0
+Second: 1.1"""
+    }
+
+    def "supports bundles which also have children"() {
         settingsFile << """
             dependencyResolutionManagement {
                 versionCatalogs {
@@ -1297,11 +1590,119 @@ class VersionCatalogExtensionIntegrationTest extends AbstractVersionCatalogInteg
             }
         """
 
+        def lib1 = mavenHttpRepo.module("org", "lib1", "1.0").publish()
+        def lib2 = mavenHttpRepo.module("org", "lib2", "1.0").publish()
+        buildFile << """
+            apply plugin: 'java-library'
+
+            dependencies {
+                implementation libs.bundles.my
+                implementation libs.bundles.my.other
+            }
+        """
+
         when:
-        fails 'help'
+        lib1.pom.expectGet()
+        lib2.pom.expectGet()
+        lib1.artifact.expectGet()
+        lib2.artifact.expectGet()
 
         then:
-        failureDescriptionContains "Cannot generate accessors for bundles because it contains both aliases and groups of the same name: [my]"
+        run ':checkDeps'
+
+        then:
+        resolve.expectGraph {
+            root(":", ":test:") {
+                module('org:lib1:1.0')
+                module('org:lib2:1.0')
+            }
+        }
+    }
+
+    def "supports bundles which also have children using intermediate leaves"() {
+        settingsFile << """
+            dependencyResolutionManagement {
+                versionCatalogs {
+                    libs {
+                        alias("lib1").to("org:lib1:1.0")
+                        alias("lib2").to("org:lib2:1.0")
+                        bundle("my.middle", ["lib1", "lib2"])
+                        bundle("my.middle.other", ["lib1", "lib2"])
+                    }
+                }
+            }
+        """
+
+        def lib1 = mavenHttpRepo.module("org", "lib1", "1.0").publish()
+        def lib2 = mavenHttpRepo.module("org", "lib2", "1.0").publish()
+        buildFile << """
+            apply plugin: 'java-library'
+
+            dependencies {
+                implementation libs.bundles.my.middle
+                implementation libs.bundles.my.middle.other
+            }
+        """
+
+        when:
+        lib1.pom.expectGet()
+        lib2.pom.expectGet()
+        lib1.artifact.expectGet()
+        lib2.artifact.expectGet()
+
+        then:
+        run ':checkDeps'
+
+        then:
+        resolve.expectGraph {
+            root(":", ":test:") {
+                module('org:lib1:1.0')
+                module('org:lib2:1.0')
+            }
+        }
+    }
+
+    def "supports bundles which also have children using empty intermediate leaves"() {
+        settingsFile << """
+            dependencyResolutionManagement {
+                versionCatalogs {
+                    libs {
+                        alias("lib1").to("org:lib1:1.0")
+                        alias("lib2").to("org:lib2:1.0")
+                        bundle("my", ["lib1", "lib2"])
+                        bundle("my.middle.other", ["lib1", "lib2"])
+                    }
+                }
+            }
+        """
+
+        def lib1 = mavenHttpRepo.module("org", "lib1", "1.0").publish()
+        def lib2 = mavenHttpRepo.module("org", "lib2", "1.0").publish()
+        buildFile << """
+            apply plugin: 'java-library'
+
+            dependencies {
+                implementation libs.bundles.my
+                implementation libs.bundles.my.middle.other
+            }
+        """
+
+        when:
+        lib1.pom.expectGet()
+        lib2.pom.expectGet()
+        lib1.artifact.expectGet()
+        lib2.artifact.expectGet()
+
+        then:
+        run ':checkDeps'
+
+        then:
+        resolve.expectGraph {
+            root(":", ":test:") {
+                module('org:lib1:1.0')
+                module('org:lib2:1.0')
+            }
+        }
     }
 
     @VersionCatalogProblemTestFor(
@@ -1382,6 +1783,68 @@ class VersionCatalogExtensionIntegrationTest extends AbstractVersionCatalogInteg
                 }
             }
         }
+    }
+
+    def "elements accessed with optional API have useful toString()"() {
+        settingsFile << """
+            dependencyResolutionManagement {
+                versionCatalogs {
+                    libs {
+                        version("ver", "1.5")
+                        alias("lib").to("org:test:1.0")
+                        alias("lib2").to("org", "test2").version {
+                            require "1.0.0"
+                            prefer "1.1.0"
+                            reject "1.0.5"
+                        }
+                        bundle("all", ["lib", "lib2"])
+                        alias('greeter').toPluginId('com.acme.greeter').version('1.4')
+                        alias('greeter2').toPluginId('com.acme.greeter2').version {
+                            require "1.0.0"
+                            prefer "1.1.0"
+                            reject "1.0.5"
+                        }
+                    }
+                }
+            }
+        """
+
+        buildFile << """
+            def catalog = project.extensions.getByType(VersionCatalogsExtension).named("libs")
+            tasks.register("printCatalog") {
+                doLast {
+                    catalog.findVersion("ver").ifPresent {
+                        println("Found version: '\${it.toString()}'.")
+                    }
+                    catalog.findDependency("lib").ifPresent {
+                        println("Found dependency: '\${it.get().toString()}'.")
+                    }
+                    catalog.findDependency("lib2").ifPresent {
+                        println("Found dependency: '\${it.get().toString()}'.")
+                    }
+                    catalog.findBundle("all").ifPresent {
+                        println("Found bundle: '\${it.get().toString()}'.")
+                    }
+                    catalog.findPlugin("greeter").ifPresent {
+                        println("Found plugin: '\${it.get().toString()}'.")
+                    }
+                    catalog.findPlugin("greeter2").ifPresent {
+                        println("Found plugin: '\${it.get().toString()}'.")
+                    }
+                }
+            }
+        """
+
+        when:
+        run 'printCatalog'
+
+        then:
+        outputContains "Found version: '1.5'."
+        outputContains "Found dependency: 'org:test:1.0'."
+        outputContains "Found dependency: 'org:test2:{require 1.0.0; prefer 1.1.0; reject 1.0.5}'."
+        outputContains "Found bundle: '[org:test:1.0, org:test2:{require 1.0.0; prefer 1.1.0; reject 1.0.5}]'."
+        outputContains "Found plugin: 'com.acme.greeter:1.4'."
+        outputContains "Found plugin: 'com.acme.greeter2:{require 1.0.0; prefer 1.1.0; reject 1.0.5}'."
     }
 
 }

@@ -14,7 +14,7 @@ dependencies {
 }
 
 tasks.processResources {
-    from(configurationCacheReportPath) { into("org/gradle/configurationcache") }
+    from(configurationCacheReportPath) { into("org/gradle/configurationcache/problems") }
 }
 
 // The integration tests in this project do not need to run in 'config cache' mode.
@@ -32,11 +32,13 @@ dependencies {
     implementation(project(":composite-builds"))
     implementation(project(":core"))
     implementation(project(":core-api"))
-    implementation(project(":data-structures"))
     implementation(project(":dependency-management"))
     implementation(project(":execution"))
     implementation(project(":file-collections"))
+    implementation(project(":file-temp"))
     implementation(project(":file-watching"))
+    implementation(project(":functional"))
+    implementation(project(":hashing"))
     implementation(project(":launcher"))
     implementation(project(":logging"))
     implementation(project(":messaging"))
@@ -59,6 +61,7 @@ dependencies {
     implementation(project(":native"))
     implementation(project(":build-option"))
 
+    implementation(libs.capsule)
     implementation(libs.groovy)
     implementation(libs.groovyJson)
     implementation(libs.slf4jApi)
@@ -76,6 +79,7 @@ dependencies {
     integTestImplementation(project(":platform-jvm"))
     integTestImplementation(project(":test-kit"))
     integTestImplementation(project(":launcher"))
+    integTestImplementation(project(":cli"))
 
     integTestImplementation(libs.guava)
     integTestImplementation(libs.ant)

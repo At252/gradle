@@ -20,7 +20,6 @@ import org.junit.Test
 class PrecompiledScriptPluginIntegrationTest : AbstractPluginIntegrationTest() {
 
     @Test
-    @ToBeFixedForConfigurationCache
     fun `generated code follows kotlin-dsl coding conventions`() {
 
         assumeNonEmbeddedGradleExecuter() // ktlint plugin issue in embedded mode
@@ -107,30 +106,26 @@ class PrecompiledScriptPluginIntegrationTest : AbstractPluginIntegrationTest() {
             ":compilePluginsBlocks",
             ":generateScriptPluginAdapters"
         )
-        val configurationTask = ":configurePrecompiledScriptDependenciesResolver"
         val downstreamKotlinCompileTask = ":compileKotlin"
 
         build(firstDir, "classes", "--build-cache").apply {
             cachedTasks.forEach { assertTaskExecuted(it) }
-            assertTaskExecuted(configurationTask)
             assertTaskExecuted(downstreamKotlinCompileTask)
         }
 
         build(firstDir, "classes", "--build-cache").apply {
             cachedTasks.forEach { assertOutputContains("$it UP-TO-DATE") }
-            assertTaskExecuted(configurationTask)
             assertOutputContains("$downstreamKotlinCompileTask UP-TO-DATE")
         }
 
         build(secondDir, "classes", "--build-cache").apply {
             cachedTasks.forEach { assertOutputContains("$it FROM-CACHE") }
-            assertTaskExecuted(configurationTask)
             assertOutputContains("$downstreamKotlinCompileTask FROM-CACHE")
         }
     }
 
     @Test
-    @ToBeFixedForConfigurationCache
+    @ToBeFixedForConfigurationCache(because = "generateScriptPluginAdapters")
     fun `precompiled script plugins adapters generation clean stale outputs`() {
 
         withBuildScript(
@@ -152,7 +147,6 @@ class PrecompiledScriptPluginIntegrationTest : AbstractPluginIntegrationTest() {
     }
 
     @Test
-    @ToBeFixedForConfigurationCache(because = "Kotlin Gradle Plugin")
     fun `can apply precompiled script plugin from groovy script`() {
 
         withKotlinBuildSrc()
@@ -177,7 +171,6 @@ class PrecompiledScriptPluginIntegrationTest : AbstractPluginIntegrationTest() {
     }
 
     @Test
-    @ToBeFixedForConfigurationCache
     fun `accessors are available after script body change`() {
 
         withKotlinBuildSrc()
@@ -221,7 +214,6 @@ class PrecompiledScriptPluginIntegrationTest : AbstractPluginIntegrationTest() {
     }
 
     @Test
-    @ToBeFixedForConfigurationCache(because = "Kotlin Gradle Plugin")
     fun `accessors are available after re-running tasks`() {
 
         withKotlinBuildSrc()
@@ -319,8 +311,11 @@ class PrecompiledScriptPluginIntegrationTest : AbstractPluginIntegrationTest() {
                     "src/main/java/producer/ProducerPlugin.java",
                     """
                     package producer;
-                    public class ProducerPlugin implements ${nameOf<Plugin<*>>()}<${nameOf<Project>()}> {
-                       @Override public void apply(${nameOf<Project>()} target) {}
+                    public class ProducerPlugin {
+                        // Using internal class to verify https://github.com/gradle/gradle/issues/17619
+                        public static class Implementation implements ${nameOf<Plugin<*>>()}<${nameOf<Project>()}> {
+                            @Override public void apply(${nameOf<Project>()} target) {}
+                        }
                     }
                     """
                 )
@@ -341,7 +336,7 @@ class PrecompiledScriptPluginIntegrationTest : AbstractPluginIntegrationTest() {
                     plugins {
                         producer {
                             id = 'producer-plugin'
-                            implementationClass = 'producer.ProducerPlugin'
+                            implementationClass = 'producer.ProducerPlugin${'$'}Implementation'
                         }
                     }
                 }
@@ -468,7 +463,6 @@ class PrecompiledScriptPluginIntegrationTest : AbstractPluginIntegrationTest() {
     """
 
     @Test
-    @ToBeFixedForConfigurationCache(because = "Kotlin Gradle Plugin")
     fun `applied precompiled script plugin is reloaded upon change`() {
         // given:
         withFolders {
@@ -553,7 +547,6 @@ class PrecompiledScriptPluginIntegrationTest : AbstractPluginIntegrationTest() {
 
     // https://github.com/gradle/gradle/issues/15416
     @Test
-    @ToBeFixedForConfigurationCache(because = "Kotlin Gradle Plugin")
     fun `can use an empty plugins block in precompiled settings plugin`() {
         withFolders {
             "build-logic" {
@@ -595,7 +588,6 @@ class PrecompiledScriptPluginIntegrationTest : AbstractPluginIntegrationTest() {
 
     // https://github.com/gradle/gradle/issues/15416
     @Test
-    @ToBeFixedForConfigurationCache(because = "Kotlin Gradle Plugin")
     fun `can apply a plugin from the same project in precompiled settings plugin`() {
         withFolders {
             "build-logic" {

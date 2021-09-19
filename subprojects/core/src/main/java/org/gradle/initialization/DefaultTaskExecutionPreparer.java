@@ -17,24 +17,19 @@
 package org.gradle.initialization;
 
 import org.gradle.api.internal.GradleInternal;
-import org.gradle.composite.internal.IncludedBuildControllers;
 import org.gradle.execution.BuildConfigurationActionExecuter;
-import org.gradle.execution.taskgraph.TaskExecutionGraphInternal;
 import org.gradle.internal.buildtree.BuildModelParameters;
 import org.gradle.internal.operations.BuildOperationExecutor;
 
 public class DefaultTaskExecutionPreparer implements TaskExecutionPreparer {
     private final BuildOperationExecutor buildOperationExecutor;
     private final BuildConfigurationActionExecuter buildConfigurationActionExecuter;
-    private final IncludedBuildControllers includedBuildControllers;
     private final BuildModelParameters buildModelParameters;
 
     public DefaultTaskExecutionPreparer(BuildConfigurationActionExecuter buildConfigurationActionExecuter,
-                                        IncludedBuildControllers includedBuildControllers,
                                         BuildOperationExecutor buildOperationExecutor,
                                         BuildModelParameters buildModelParameters) {
         this.buildConfigurationActionExecuter = buildConfigurationActionExecuter;
-        this.includedBuildControllers = includedBuildControllers;
         this.buildOperationExecutor = buildOperationExecutor;
         this.buildModelParameters = buildModelParameters;
     }
@@ -42,11 +37,6 @@ public class DefaultTaskExecutionPreparer implements TaskExecutionPreparer {
     @Override
     public void prepareForTaskExecution(GradleInternal gradle) {
         buildConfigurationActionExecuter.select(gradle);
-
-        TaskExecutionGraphInternal taskGraph = gradle.getTaskGraph();
-        taskGraph.populate();
-
-        includedBuildControllers.populateTaskGraphs();
 
         if (buildModelParameters.isConfigureOnDemand() && gradle.isRootBuild()) {
             new ProjectsEvaluatedNotifier(buildOperationExecutor).notify(gradle);

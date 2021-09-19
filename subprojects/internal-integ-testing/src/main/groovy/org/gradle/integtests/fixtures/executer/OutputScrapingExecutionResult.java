@@ -23,8 +23,8 @@ import org.gradle.internal.featurelifecycle.LoggingDeprecatedFeatureHandler;
 import org.gradle.launcher.daemon.client.DaemonStartupMessage;
 import org.gradle.launcher.daemon.server.DaemonStateCoordinator;
 import org.gradle.launcher.daemon.server.health.LowHeapSpaceDaemonExpirationStrategy;
-import org.gradle.util.internal.GUtil;
 import org.gradle.util.internal.CollectionUtils;
+import org.gradle.util.internal.GUtil;
 import org.junit.ComparisonFailure;
 
 import java.util.ArrayList;
@@ -37,7 +37,12 @@ import java.util.TreeSet;
 import java.util.regex.Pattern;
 
 public class OutputScrapingExecutionResult implements ExecutionResult {
-    static final Pattern STACK_TRACE_ELEMENT = Pattern.compile("\\s+(at\\s+)?([\\w.$_]+/)?[\\w.$_]+\\.[\\w$_ =+'-<>]+\\(.+?\\)(\\x1B\\[0K)?");
+    // This monster is to find lines in our logs that look like stack traces
+    // We want to match lines that contain just packages and classes:
+    // at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.lambda$executeIfValid$1(ExecuteActionsTaskExecuter.java:145)
+    // and with module names:
+    // at java.base/java.lang.Thread.dumpStack(Thread.java:1383)
+    static final Pattern STACK_TRACE_ELEMENT = Pattern.compile("\\s+(at\\s+)?([\\w.$_]+/)?[a-zA-Z_][\\w.$]+\\.[\\w$_ =+'-<>]+\\(.+?\\)(\\x1B\\[0K)?");
     private static final String TASK_PREFIX = "> Task ";
 
     //for example: ':a SKIPPED' or ':foo:bar:baz UP-TO-DATE' but not ':a'
@@ -167,12 +172,22 @@ public class OutputScrapingExecutionResult implements ExecutionResult {
                 result.add(BUILD_RESULT_PATTERN.matcher(line).replaceFirst("$1 $2 in 0s"));
                 i++;
             } else {
-                result.add(line);
+                result.add(normalizeLambdaIds(line));
                 i++;
             }
         }
 
         return LogContent.of(result).withNormalizedEol();
+    }
+
+    /**
+     * Normalize the non-deterministic part of lambda class name.
+     *
+     * Lambdas do have some non-deterministic class names, depending on when they are loaded.
+     * Since we want to assert the Lambda class name for some deprecation warning tests, we replace the non-deterministic part by {@code <non-deterministic>}.
+     */
+    private String normalizeLambdaIds(String line) {
+        return line.replaceAll("\\$\\$Lambda\\$[0-9]+/(0x)?[0-9a-f]+", "\\$\\$Lambda\\$<non-deterministic>");
     }
 
     @Override

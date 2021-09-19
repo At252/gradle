@@ -16,13 +16,16 @@
 
 package org.gradle.api.tasks;
 
+import org.gradle.api.Incubating;
 import org.gradle.api.InvalidUserDataException;
 import org.gradle.api.internal.file.copy.CopyAction;
 import org.gradle.api.internal.file.copy.CopySpecInternal;
 import org.gradle.api.internal.file.copy.DestinationRootCopySpec;
 import org.gradle.api.internal.file.copy.FileCopyAction;
+import org.gradle.work.DisableCachingByDefault;
 
 import java.io.File;
+import java.util.concurrent.Callable;
 
 /**
  * Copies files into a destination directory. This task can also rename and filter files as it copies. The task
@@ -65,6 +68,7 @@ import java.io.File;
  * }
  * </pre>
  */
+@DisableCachingByDefault(because = "Not worth caching")
 public class Copy extends AbstractCopyTask {
 
     @Override
@@ -87,6 +91,25 @@ public class Copy extends AbstractCopyTask {
     }
 
     /**
+     * Force Gradle to ignore content in the destination directory.
+     * <p>
+     * This can be useful if the destination directory contains unreadable content, or special files like named pipes that Gradle cannot snapshot.
+     * It can also be useful when copying to a location not exclusively owned by the build, for example to a common installation directory.
+     * In the latter case calling this method will prevent Gradle from trying to snapshot a potentially large amount of content (that might also contain unreadable files).
+     * Copy tasks which ignore content in the destination directory are never up-to-date.
+     *
+     * @see Untracked
+     * @since 7.3
+     */
+    @Incubating
+    public void ignoreExistingContentInDestinationDir() {
+        getOutputs()
+            .dir((Callable<File>) this::getDestinationDir)
+            .withPropertyName("untrackedDestinationDir")
+            .untracked();
+    }
+
+    /**
      * Returns the directory to copy files into.
      *
      * @return The destination dir.
@@ -104,5 +127,4 @@ public class Copy extends AbstractCopyTask {
     public void setDestinationDir(File destinationDir) {
         into(destinationDir);
     }
-
 }

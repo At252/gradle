@@ -25,6 +25,7 @@ import org.gradle.api.internal.tasks.testing.junit.result.BinaryResultBackedTest
 import org.gradle.api.internal.tasks.testing.junit.result.TestResultsProvider;
 import org.gradle.api.internal.tasks.testing.report.DefaultTestReport;
 import org.gradle.api.model.ObjectFactory;
+import org.gradle.api.tasks.IgnoreEmptyDirectories;
 import org.gradle.api.tasks.InputFiles;
 import org.gradle.api.tasks.OutputDirectory;
 import org.gradle.api.tasks.PathSensitive;
@@ -32,6 +33,7 @@ import org.gradle.api.tasks.PathSensitivity;
 import org.gradle.api.tasks.SkipWhenEmpty;
 import org.gradle.api.tasks.TaskAction;
 import org.gradle.internal.operations.BuildOperationExecutor;
+import org.gradle.work.DisableCachingByDefault;
 
 import javax.inject.Inject;
 import java.io.File;
@@ -44,6 +46,7 @@ import static org.gradle.util.internal.CollectionUtils.collect;
 /**
  * Generates an HTML test report from the results of one or more {@link Test} tasks.
  */
+@DisableCachingByDefault(because = "Not made cacheable, yet")
 public class TestReport extends DefaultTask {
     private File destinationDir;
     private ConfigurableFileCollection resultDirs = getObjectFactory().fileCollection();
@@ -76,9 +79,10 @@ public class TestReport extends DefaultTask {
     /**
      * Returns the set of binary test results to include in the report.
      */
-    @PathSensitive(PathSensitivity.NONE)
     @InputFiles
     @SkipWhenEmpty
+    @IgnoreEmptyDirectories
+    @PathSensitive(PathSensitivity.NONE)
     public FileCollection getTestResultDirs() {
         return resultDirs;
     }

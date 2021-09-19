@@ -17,14 +17,15 @@
 package org.gradle.internal.build;
 
 import org.gradle.api.artifacts.component.BuildIdentifier;
-import org.gradle.api.artifacts.component.ProjectComponentIdentifier;
 import org.gradle.api.internal.GradleInternal;
 import org.gradle.api.internal.SettingsInternal;
-import org.gradle.api.internal.project.ProjectState;
+import org.gradle.execution.taskgraph.TaskExecutionGraphInternal;
 import org.gradle.initialization.IncludedBuildSpec;
+import org.gradle.internal.DisplayName;
 import org.gradle.util.Path;
 
 import java.io.File;
+import java.util.function.Consumer;
 
 /**
  * Encapsulates the identity and state of a particular build in a build tree.
@@ -32,6 +33,8 @@ import java.io.File;
  * Implementations are not yet entirely thread-safe, but should be.
  */
 public interface BuildState {
+    DisplayName getDisplayName();
+
     /**
      * Returns the identifier for this build. The identifier is fixed for the lifetime of the build.
      */
@@ -46,6 +49,11 @@ public interface BuildState {
      * Is this an implicit build? An implicit build is one that is managed by Gradle and which is not addressable by user build logic.
      */
     boolean isImplicitBuild();
+
+    /**
+     * Should this build be imported into an IDE? Some implicit builds, such as source dependency builds, are not intended to be imported into the IDE or editable by users.
+     */
+    boolean isImportableBuild();
 
     /**
      * The configured settings object for this build, if available.
@@ -64,17 +72,23 @@ public interface BuildState {
     /**
      * Calculates the identity path for a project in this build.
      */
-    Path getIdentityPathForProject(Path projectPath) throws IllegalStateException;
+    Path calculateIdentityPathForProject(Path projectPath) throws IllegalStateException;
 
     /**
-     * Calculates the identifier for a project in this build.
+     * Loads the projects for this build so that {@link #getProjects()} can be used, if not already done.
+     * This includes running the settings script for the build.
      */
-    ProjectComponentIdentifier getIdentifierForProject(Path projectPath) throws IllegalStateException;
+    void ensureProjectsLoaded();
 
     /**
-     * Locates a project of this build.
+     * Ensures all projects in this build are configured, if not already done.
      */
-    ProjectState getProject(Path projectPath);
+    void ensureProjectsConfigured();
+
+    /**
+     * Returns the projects of this build. Fails if the projects are not yet loaded for this build.
+     */
+    BuildProjectRegistry getProjects();
 
     /**
      * Asserts that the given build can be included by this build.
@@ -92,4 +106,9 @@ public interface BuildState {
      * Returns the current state of the mutable model of this build.
      */
     GradleInternal getMutableModel();
+
+    /**
+     * Populates the task graph of this build using the given action.
+     */
+    void populateWorkGraph(Consumer<? super TaskExecutionGraphInternal> action);
 }

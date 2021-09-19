@@ -74,11 +74,11 @@ We would generate the following type-safe accessors:
 - `libs.groovy.json`
 - `libs.androidx.awesome.lib`
 
-It is illegal to have an alias to a dependency which happens to also belong to a nested group.
-For example `commons` and `commons-core` is illegal.
-
 In case you want to avoid the generation of a subgroup accessor, we recommend to rely on case to differentiate.
 For example the aliases `groovyCore`, `groovyJson` and `groovyXml` would be mapped to the `libs.groovyCore`, `libs.groovyJson` and `libs.groovyXml` accessors respectively.
+
+When declaring aliases, it's worth noting that any of the `-`, `_` and `.` characters can be used as separators, but the generated catalog will have all normalized to `.`:
+for example `foo-bar` as an alias is converted to `foo.bar` automatically.
 ====
 
 [[sec:common-version-numbers]]
@@ -146,6 +146,27 @@ include::sample[dir="snippets/dependencyManagement/catalogs-settings/kotlin",fil
 
 The semantics are again equivalent: adding a single bundle is equivalent to adding all dependencies which are part of the bundle individually.
 
+[[sec:plugins]]
+==== Plugins
+
+In addition to libraries, version catalog supports declaring plugin versions.
+While libraries are represented by their group, artifact and version coordinates, Gradle plugins are identified by their id and version only.
+Therefore, they need to be declared separately:
+
+.Declaring a plugin version
+====
+include::sample[dir="snippets/dependencyManagement/catalogs-settings/groovy",files="settings.gradle[tags=catalog_with_plugin]"]
+include::sample[dir="snippets/dependencyManagement/catalogs-settings/kotlin",files="settings.gradle.kts[tags=catalog_with_plugin]"]
+====
+
+Then the plugin is accessible in the `plugins` block and can be consumed in any project of the build using:
+
+.Using a plugin declared in a catalog
+====
+include::sample[dir="snippets/dependencyManagement/catalogs-settings/groovy",files="build.gradle[tags=use_plugin]"]
+include::sample[dir="snippets/dependencyManagement/catalogs-settings/kotlin",files="build.gradle.kts[tags=use_plugin]"]
+====
+
 [[sub:conventional-dependencies-toml]]
 === The libs.versions.toml file
 
@@ -176,11 +197,12 @@ include::sample[dir="snippets/dependencyManagement/catalogs-toml/kotlin",files="
 [[sub::toml-dependencies-format]]
 ==== The version catalog TOML file format
 
-The https://toml.io/[TOML] file consists of 3 major sections:
+The https://toml.io/[TOML] file consists of 4 major sections:
 
 - the `[versions]` section is used to declare versions which can be referenced by dependencies
 - the `[libraries]` section is used to declare the aliases to coordinates
 - the `[bundles]` section is used to declare dependency bundles
+- the `[plugins]` section is used to declare plugins
 
 For example:
 

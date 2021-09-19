@@ -16,25 +16,25 @@
 
 package org.gradle.tooling.internal.provider.runner;
 
-import org.gradle.api.initialization.IncludedBuild;
-import org.gradle.api.internal.GradleInternal;
-import org.gradle.api.invocation.Gradle;
-import org.gradle.execution.ProjectConfigurer;
-import org.gradle.internal.InternalBuildAdapter;
-import org.gradle.internal.build.IncludedBuildState;
+import org.gradle.internal.build.BuildToolingModelAction;
+import org.gradle.internal.build.BuildToolingModelController;
 import org.gradle.internal.buildtree.BuildActionRunner;
 import org.gradle.internal.buildtree.BuildTreeLifecycleController;
 import org.gradle.internal.invocation.BuildAction;
 import org.gradle.tooling.internal.protocol.InternalUnsupportedModelException;
 import org.gradle.tooling.internal.provider.action.BuildModelAction;
+import org.gradle.tooling.internal.provider.serialization.PayloadSerializer;
+import org.gradle.tooling.internal.provider.serialization.SerializedPayload;
 import org.gradle.tooling.provider.model.UnknownModelException;
 import org.gradle.tooling.provider.model.internal.ToolingModelBuilderLookup;
 
-import java.util.HashSet;
-import java.util.Set;
-import java.util.function.Function;
-
 public class BuildModelActionRunner implements BuildActionRunner {
+    private final PayloadSerializer payloadSerializer;
+
+    public BuildModelActionRunner(PayloadSerializer payloadSerializer) {
+        this.payloadSerializer = payloadSerializer;
+    }
+
     @Override
     public Result run(BuildAction action, final BuildTreeLifecycleController buildController) {
         if (!(action instanceof BuildModelAction)) {
@@ -42,15 +42,17 @@ public class BuildModelActionRunner implements BuildActionRunner {
         }
 
         BuildModelAction buildModelAction = (BuildModelAction) action;
-        GradleInternal gradle = buildController.getGradle();
 
         ModelCreateAction createAction = new ModelCreateAction(buildModelAction);
         try {
             if (buildModelAction.isCreateModel()) {
-                gradle.addBuildListener(new ForceFullConfigurationListener());
+                Object result = buildController.fromBuildModel(buildModelAction.isRunTasks(), createAction);
+                SerializedPayload serializedResult = payloadSerializer.serialize(result);
+                return Result.of(serializedResult);
+            } else {
+                buildController.scheduleAndRunTasks();
+                return Result.of(null);
             }
-            Object result = buildController.fromBuildModel(buildModelAction.isRunTasks(), createAction);
-            return Result.of(result);
         } catch (RuntimeException e) {
             RuntimeException clientFailure = e;
             if (createAction.modelLookupFailure != null) {
@@ -60,11 +62,7 @@ public class BuildModelActionRunner implements BuildActionRunner {
         }
     }
 
-    private static ToolingModelBuilderLookup getToolingModelBuilderRegistry(GradleInternal gradle) {
-        return gradle.getDefaultProject().getServices().get(ToolingModelBuilderLookup.class);
-    }
-
-    private static class ModelCreateAction implements Function<GradleInternal, Object> {
+    private static class ModelCreateAction implements BuildToolingModelAction<Object> {
         private final BuildModelAction buildModelAction;
         private UnknownModelException modelLookupFailure;
 
@@ -73,37 +71,21 @@ public class BuildModelActionRunner implements BuildActionRunner {
         }
 
         @Override
-        public Object apply(GradleInternal gradle) {
+        public void beforeTasks(BuildToolingModelController controller) {
+            // Ignore
+        }
+
+        @Override
+        public Object fromBuildModel(BuildToolingModelController controller) {
             String modelName = buildModelAction.getModelName();
-            ToolingModelBuilderLookup builderRegistry = getToolingModelBuilderRegistry(gradle);
             ToolingModelBuilderLookup.Builder builder;
             try {
-                builder = builderRegistry.locateForClientOperation(modelName, false, gradle);
+                builder = controller.locateBuilderForDefaultTarget(modelName, false);
             } catch (UnknownModelException e) {
                 modelLookupFailure = e;
                 throw e;
             }
             return builder.build(null);
-        }
-    }
-
-    private static class ForceFullConfigurationListener extends InternalBuildAdapter {
-        @Override
-        public void projectsEvaluated(Gradle gradle) {
-            forceFullConfiguration((GradleInternal) gradle, new HashSet<>());
-        }
-
-        private void forceFullConfiguration(GradleInternal gradle, Set<GradleInternal> alreadyConfigured) {
-            gradle.getServices().get(ProjectConfigurer.class).configureHierarchyFully(gradle.getRootProject());
-            for (IncludedBuild includedBuild : gradle.getIncludedBuilds()) {
-                if (includedBuild instanceof IncludedBuildState) {
-                    GradleInternal build = ((IncludedBuildState) includedBuild).getConfiguredBuild();
-                    if (!alreadyConfigured.contains(build)) {
-                        alreadyConfigured.add(build);
-                        forceFullConfiguration(build, alreadyConfigured);
-                    }
-                }
-            }
         }
     }
 }

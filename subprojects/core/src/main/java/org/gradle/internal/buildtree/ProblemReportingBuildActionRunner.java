@@ -33,24 +33,28 @@ import java.util.function.Consumer;
 public class ProblemReportingBuildActionRunner implements BuildActionRunner {
     private final BuildActionRunner delegate;
     private final ExceptionAnalyser exceptionAnalyser;
+    private final BuildLayout buildLayout;
     private final List<? extends ProblemReporter> reporters;
 
-    public ProblemReportingBuildActionRunner(BuildActionRunner delegate, ExceptionAnalyser exceptionAnalyser, List<? extends ProblemReporter> reporters) {
+    public ProblemReportingBuildActionRunner(BuildActionRunner delegate, ExceptionAnalyser exceptionAnalyser, BuildLayout buildLayout, List<? extends ProblemReporter> reporters) {
         this.delegate = delegate;
         this.exceptionAnalyser = exceptionAnalyser;
+        this.buildLayout = buildLayout;
         this.reporters = ImmutableList.sortedCopyOf(Comparator.comparing(ProblemReporter::getId), reporters);
     }
 
     @Override
     public Result run(BuildAction action, BuildTreeLifecycleController buildController) {
-        File defaultRootBuildDir = new File(buildController.getGradle().getServices().get(BuildLayout.class).getRootDirectory(), "build");
-        RootProjectBuildDirCollectingListener listener = new RootProjectBuildDirCollectingListener(defaultRootBuildDir);
-        buildController.getGradle().addBuildListener(listener);
-
+        RootProjectBuildDirCollectingListener rootProjectBuildDirListener = getRootProjectBuildDirCollectingListener(buildController);
         Result result = delegate.run(action, buildController);
 
+        File rootProjectBuildDir = rootProjectBuildDirListener.rootProjectBuildDir;
+        List<Throwable> failures = reportProblems(rootProjectBuildDir);
+        return result.addFailures(failures);
+    }
+
+    private List<Throwable> reportProblems(File rootProjectBuildDir) {
         List<Throwable> failures = new ArrayList<>();
-        File rootProjectBuildDir = listener.buildDir;
         Consumer<Throwable> collector = failure -> failures.add(exceptionAnalyser.transform(failure));
         for (ProblemReporter reporter : reporters) {
             try {
@@ -59,19 +63,31 @@ public class ProblemReportingBuildActionRunner implements BuildActionRunner {
                 failures.add(e);
             }
         }
-        return result.addFailures(failures);
+        return failures;
+    }
+
+    private RootProjectBuildDirCollectingListener getRootProjectBuildDirCollectingListener(BuildTreeLifecycleController buildController) {
+        RootProjectBuildDirCollectingListener listener = new RootProjectBuildDirCollectingListener(
+            defaultRootBuildDirOf()
+        );
+        buildController.beforeBuild(gradle -> gradle.addBuildListener(listener));
+        return listener;
+    }
+
+    private File defaultRootBuildDirOf() {
+        return new File(buildLayout.getRootDirectory(), "build");
     }
 
     private static class RootProjectBuildDirCollectingListener extends InternalBuildAdapter {
-        File buildDir;
+        File rootProjectBuildDir;
 
         public RootProjectBuildDirCollectingListener(File defaultBuildDir) {
-            this.buildDir = defaultBuildDir;
+            this.rootProjectBuildDir = defaultBuildDir;
         }
 
         @Override
         public void projectsEvaluated(Gradle gradle) {
-            buildDir = gradle.getRootProject().getBuildDir();
+            rootProjectBuildDir = gradle.getRootProject().getBuildDir();
         }
     }
 }

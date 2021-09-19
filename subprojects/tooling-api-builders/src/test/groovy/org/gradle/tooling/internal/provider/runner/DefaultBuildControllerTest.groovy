@@ -17,44 +17,35 @@
 package org.gradle.tooling.internal.provider.runner
 
 import org.gradle.api.BuildCancelledException
-import org.gradle.api.internal.GradleInternal
-import org.gradle.api.internal.project.ProjectInternal
+import org.gradle.api.internal.project.ProjectState
 import org.gradle.initialization.BuildCancellationToken
+import org.gradle.internal.build.BuildProjectRegistry
+import org.gradle.internal.build.BuildState
+import org.gradle.internal.build.BuildStateRegistry
+import org.gradle.internal.build.BuildToolingModelController
 import org.gradle.internal.concurrent.GradleThread
 import org.gradle.internal.operations.MultipleBuildOperationFailures
-import org.gradle.internal.operations.TestBuildOperationExecutor
-import org.gradle.internal.resources.ProjectLeaseRegistry
-import org.gradle.internal.service.ServiceRegistry
 import org.gradle.tooling.internal.gradle.GradleBuildIdentity
 import org.gradle.tooling.internal.gradle.GradleProjectIdentity
 import org.gradle.tooling.internal.protocol.InternalUnsupportedModelException
 import org.gradle.tooling.internal.protocol.ModelIdentifier
 import org.gradle.tooling.provider.model.UnknownModelException
 import org.gradle.tooling.provider.model.internal.ToolingModelBuilderLookup
+import org.gradle.util.Path
 import spock.lang.Specification
 
+import java.util.function.Consumer
 import java.util.function.Supplier
 
 class DefaultBuildControllerTest extends Specification {
     def cancellationToken = Stub(BuildCancellationToken)
-    def gradle = Stub(GradleInternal) {
-        getServices() >> Stub(ServiceRegistry) {
-            get(BuildCancellationToken) >> cancellationToken
-        }
-    }
-    def registry = Stub(ToolingModelBuilderLookup)
-    def project = Stub(ProjectInternal) {
-        getServices() >> Stub(ServiceRegistry) {
-            get(ToolingModelBuilderLookup) >> registry
-        }
-    }
     def modelId = Stub(ModelIdentifier) {
         getName() >> 'some.model'
     }
     def modelBuilder = Stub(ToolingModelBuilderLookup.Builder)
-    def projectLeaseRegistry = Stub(ProjectLeaseRegistry)
-    def buildOperationExecutor = new TestBuildOperationExecutor()
-    def controller = new DefaultBuildController(gradle, cancellationToken, buildOperationExecutor, projectLeaseRegistry)
+    def buildStateRegistry = Stub(BuildStateRegistry)
+    def toolingModelController = Mock(BuildToolingModelController)
+    def controller = new DefaultBuildController(toolingModelController, cancellationToken, buildStateRegistry)
 
     def setup() {
         GradleThread.setManaged()
@@ -80,8 +71,7 @@ class DefaultBuildControllerTest extends Specification {
         def failure = new UnknownModelException("not found")
 
         given:
-        _ * gradle.defaultProject >> project
-        _ * registry.locateForClientOperation('some.model', false, gradle) >> { throw failure }
+        _ * toolingModelController.locateBuilderForDefaultTarget('some.model', false) >> { throw failure }
 
         when:
         controller.getModel(null, modelId)
@@ -106,16 +96,29 @@ class DefaultBuildControllerTest extends Specification {
     def "uses builder for specified project"() {
         def rootDir = new File("dummy")
         def target = Stub(GradleProjectIdentity)
-        def rootProject = Stub(ProjectInternal)
+        def buildState1 = Stub(BuildState)
+        def buildState2 = Stub(BuildState)
+        def buildState3 = Stub(BuildState)
+        def projects3 = Stub(BuildProjectRegistry)
+        def projectState = Stub(ProjectState)
         def model = new Object()
 
         given:
         _ * target.projectPath >> ":some:path"
         _ * target.rootDir >> rootDir
-        _ * gradle.rootProject >> rootProject
-        _ * rootProject.project(":some:path") >> project
-        _ * rootProject.projectDir >> rootDir
-        _ * registry.locateForClientOperation("some.model", false, project) >> modelBuilder
+        _ * buildStateRegistry.visitBuilds(_) >> { Consumer consumer ->
+            consumer.accept(buildState1)
+            consumer.accept(buildState2)
+            consumer.accept(buildState3)
+        }
+        _ * buildState1.importableBuild >> false
+        _ * buildState2.importableBuild >> true
+        _ * buildState2.buildRootDir >> new File("different")
+        _ * buildState3.importableBuild >> true
+        _ * buildState3.buildRootDir >> rootDir
+        _ * buildState3.projects >> projects3
+        _ * projects3.getProject(Path.path(":some:path")) >> projectState
+        _ * toolingModelController.locateBuilderForTarget(projectState, "some.model", false) >> modelBuilder
         _ * modelBuilder.build(null) >> model
 
         when:
@@ -128,15 +131,20 @@ class DefaultBuildControllerTest extends Specification {
     def "uses builder for specified build"() {
         def rootDir = new File("dummy")
         def target = Stub(GradleBuildIdentity)
-        def rootProject = Stub(ProjectInternal)
+        def buildState1 = Stub(BuildState)
+        def buildState2 = Stub(BuildState)
         def model = new Object()
 
         given:
         _ * target.rootDir >> rootDir
-        _ * gradle.rootProject >> rootProject
-        _ * rootProject.projectDir >> rootDir
-        _ * gradle.defaultProject >> project
-        _ * registry.locateForClientOperation("some.model", false, gradle) >> modelBuilder
+        _ * buildStateRegistry.visitBuilds(_) >> { Consumer consumer ->
+            consumer.accept(buildState1)
+            consumer.accept(buildState2)
+        }
+        _ * buildState1.importableBuild >> false
+        _ * buildState2.importableBuild >> true
+        _ * buildState2.buildRootDir >> rootDir
+        _ * toolingModelController.locateBuilderForTarget(buildState2, "some.model", false) >> modelBuilder
         _ * modelBuilder.build(null) >> model
 
         when:
@@ -150,8 +158,7 @@ class DefaultBuildControllerTest extends Specification {
         def model = new Object()
 
         given:
-        _ * gradle.defaultProject >> project
-        _ * registry.locateForClientOperation("some.model", false, gradle) >> modelBuilder
+        _ * toolingModelController.locateBuilderForDefaultTarget("some.model", false) >> modelBuilder
         _ * modelBuilder.build(null) >> model
 
         when:
@@ -187,8 +194,7 @@ class DefaultBuildControllerTest extends Specification {
         }
 
         given:
-        _ * gradle.defaultProject >> project
-        _ * registry.locateForClientOperation("some.model", true, gradle) >> modelBuilder
+        _ * toolingModelController.locateBuilderForDefaultTarget("some.model", true) >> modelBuilder
         _ * modelBuilder.getParameterType() >> parameterType
         _ * modelBuilder.build(_) >> { CustomParameter param ->
             assert param != null
@@ -214,6 +220,10 @@ class DefaultBuildControllerTest extends Specification {
         then:
         result == ["one", "two", "three"]
 
+        1 * toolingModelController.runQueryModelActions(_) >> { def params ->
+            def actions = params[0]
+            actions.forEach { it.run(null) }
+        }
         1 * action1.get() >> "one"
         1 * action2.get() >> "two"
         1 * action3.get() >> "three"
@@ -234,6 +244,10 @@ class DefaultBuildControllerTest extends Specification {
         def e = thrown(MultipleBuildOperationFailures)
         e.causes == [failure1, failure2]
 
+        1 * toolingModelController.runQueryModelActions(_) >> { def params ->
+            def actions = params[0]
+            actions.forEach { it.run(null) }
+        }
         1 * action1.get() >> { throw failure1 }
         1 * action2.get() >> { throw failure2 }
         1 * action3.get() >> "three"

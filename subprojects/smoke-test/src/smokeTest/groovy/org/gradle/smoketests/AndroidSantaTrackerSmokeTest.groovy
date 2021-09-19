@@ -18,7 +18,6 @@ package org.gradle.smoketests
 
 import org.gradle.integtests.fixtures.UnsupportedWithConfigurationCache
 import org.gradle.util.GradleVersion
-import org.gradle.util.internal.VersionNumber
 
 import static org.gradle.testkit.runner.TaskOutcome.SUCCESS
 
@@ -28,18 +27,6 @@ class AndroidSantaTrackerSmokeTest extends AbstractAndroidSantaTrackerSmokeTest 
     @Override
     protected int maxConfigurationCacheProblems() {
         return 150
-    }
-
-    def "plop (agp=#agpVersion)"() {
-        expect:
-        if (VersionNumber.parse(agpVersion).baseVersion < VersionNumber.version(4, 2)) {
-            println("OLD WITH DEPWARN")
-        } else {
-            println("RECENT NO DEPWARN")
-        }
-
-        where:
-        agpVersion << TESTED_AGP_VERSIONS
     }
 
     @UnsupportedWithConfigurationCache(iterationMatchers = [AGP_4_0_ITERATION_MATCHER, AGP_4_1_ITERATION_MATCHER])
@@ -113,7 +100,7 @@ class AndroidSantaTrackerSmokeTest extends AbstractAndroidSantaTrackerSmokeTest 
         def runner = runnerForLocationExpectingLintDeprecations(checkoutDir, agpVersion, "lintDebug",
             [
                 "wearable-2.3.0.jar (com.google.android.wearable:wearable:2.3.0)",
-                "kotlin-android-extensions-runtime-1.5.0-RC.jar (org.jetbrains.kotlin:kotlin-android-extensions-runtime:1.5.0-RC)"
+                "kotlin-android-extensions-runtime-${kotlinVersion}.jar (org.jetbrains.kotlin:kotlin-android-extensions-runtime:${kotlinVersion})"
             ])
         def result = runner.buildAndFail()
 
@@ -125,7 +112,7 @@ class AndroidSantaTrackerSmokeTest extends AbstractAndroidSantaTrackerSmokeTest 
         result = runnerForLocationExpectingLintDeprecations(checkoutDir, agpVersion, "lintDebug",
             [
                 "wearable-2.3.0.jar (com.google.android.wearable:wearable:2.3.0)",
-                "kotlin-android-extensions-runtime-1.5.0-RC.jar (org.jetbrains.kotlin:kotlin-android-extensions-runtime:1.5.0-RC)",
+                "kotlin-android-extensions-runtime-${kotlinVersion}.jar (org.jetbrains.kotlin:kotlin-android-extensions-runtime:${kotlinVersion})",
                 "appcompat-1.0.2.aar (androidx.appcompat:appcompat:1.0.2)"
             ])
             .buildAndFail()

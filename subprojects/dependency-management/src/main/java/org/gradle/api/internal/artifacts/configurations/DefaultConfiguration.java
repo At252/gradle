@@ -68,6 +68,7 @@ import org.gradle.api.internal.artifacts.ExcludeRuleNotationConverter;
 import org.gradle.api.internal.artifacts.Module;
 import org.gradle.api.internal.artifacts.ResolverResults;
 import org.gradle.api.internal.artifacts.dependencies.DefaultDependencyConstraint;
+import org.gradle.api.internal.artifacts.dependencies.DependencyConstraintInternal;
 import org.gradle.api.internal.artifacts.ivyservice.DefaultLenientConfiguration;
 import org.gradle.api.internal.artifacts.ivyservice.ResolvedArtifactCollectingVisitor;
 import org.gradle.api.internal.artifacts.ivyservice.ResolvedFileCollectionVisitor;
@@ -736,14 +737,18 @@ public class DefaultConfiguration extends AbstractFileCollection implements Conf
     }
 
     private Optional<ResolveException> failuresWithHint(Collection<? extends Throwable> causes) {
-        if (ignoresSettingsRepositories()) {
-            boolean hasModuleNotFound = causes.stream().anyMatch(ModuleVersionNotFoundException.class::isInstance);
-            if (hasModuleNotFound) {
-                return Optional.of(new ResolveExceptionWithHints(getDisplayName(), causes,
-                    "The project declares repositories, effectively ignoring the repositories you have declared in the settings.",
-                    "You can figure out how project repositories are declared by configuring your build to fail on project repositories.",
-                    "See " + documentationRegistry.getDocumentationFor("declaring_repositories", "sub:fail_build_on_project_repositories") + " for details."));
+        try {
+            if (ignoresSettingsRepositories()) {
+                boolean hasModuleNotFound = causes.stream().anyMatch(ModuleVersionNotFoundException.class::isInstance);
+                if (hasModuleNotFound) {
+                    return Optional.of(new ResolveExceptionWithHints(getDisplayName(), causes,
+                        "The project declares repositories, effectively ignoring the repositories you have declared in the settings.",
+                        "You can figure out how project repositories are declared by configuring your build to fail on project repositories.",
+                        "See " + documentationRegistry.getDocumentationFor("declaring_repositories", "sub:fail_build_on_project_repositories") + " for details."));
+                }
             }
+        } catch (Throwable e) {
+            return Optional.of(new ResolveException(getDisplayName(), ImmutableList.<Throwable>builder().addAll(causes).add(e).build()));
         }
         return Optional.empty();
     }
@@ -1139,7 +1144,7 @@ public class DefaultConfiguration extends AbstractFileCollection implements Conf
         }
         DomainObjectSet<DependencyConstraint> copiedDependencyConstraints = copiedConfiguration.getDependencyConstraints();
         for (DependencyConstraint dependencyConstraint : dependencyConstraints) {
-            copiedDependencyConstraints.add(((DefaultDependencyConstraint) dependencyConstraint).copy());
+            copiedDependencyConstraints.add(((DependencyConstraintInternal) dependencyConstraint).copy());
         }
         return copiedConfiguration;
     }

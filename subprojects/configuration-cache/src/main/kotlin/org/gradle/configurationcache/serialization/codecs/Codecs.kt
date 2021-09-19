@@ -157,6 +157,7 @@ class Codecs(
         bind(IsolateTransformerParametersNodeCodec(parameterScheme, isolatableFactory, buildOperationExecutor, classLoaderHierarchyHasher, fileCollectionFactory, documentationRegistry))
         bind(FinalizeTransformDependenciesNodeCodec())
         bind(WorkNodeActionCodec)
+        bind(CapabilitiesCodec)
 
         bind(DefaultCopySpecCodec(patternSetFactory, fileCollectionFactory, instantiator))
         bind(DestinationRootCopySpecCodec(fileResolver))
@@ -185,6 +186,8 @@ class Codecs(
         // Java serialization integration
         bind(unsupported<Externalizable>(NotYetImplementedJavaSerialization))
         bind(JavaObjectSerializationCodec())
+
+        bind(BeanSpecCodec)
 
         // This protects the BeanCodec against StackOverflowErrors but
         // we can still get them for the other codecs, for instance,

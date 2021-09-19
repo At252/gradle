@@ -27,9 +27,9 @@ import spock.lang.IgnoreIf
 import spock.lang.Issue
 import spock.lang.Unroll
 
-import static org.gradle.testing.fixture.JUnitCoverage.JUNIT_4_LATEST
-import static org.gradle.testing.fixture.JUnitCoverage.JUNIT_VINTAGE_JUPITER
+import static org.gradle.testing.fixture.JUnitCoverage.*
 import static org.hamcrest.CoreMatchers.equalTo
+
 /**
  * General tests for the JVM testing infrastructure that don't deserve their own test class.
  */
@@ -258,8 +258,6 @@ class TestingIntegrationTest extends JUnitMultiVersionIntegrationSpec {
         result.assertTestClassesExecuted("TestCaseExtendsAbstractClass")
     }
 
-    @Requires(TestPrecondition.JDK15_OR_EARLIER) // java.lang.IncompatibleClassChangeError: class com.google.common.collect.ImmutableCollection$EmptyImmutableCollection
-                                                 // overrides final method com.google.common.collect.ImmutableCollection.toArray()[Ljava/lang/Object;
     @Issue("https://issues.gradle.org/browse/GRADLE-2962")
     def "incompatible user versions of classes that we also use don't affect test execution"() {
 
@@ -278,8 +276,12 @@ class TestingIntegrationTest extends JUnitMultiVersionIntegrationSpec {
         // In a nutshell, this tests that we don't even try to load classes that are there, but that we shouldn't see.
 
         when:
+        executer.withToolchainDetectionEnabled().withToolchainDownloadEnabled()
         buildScript """
-            apply plugin: 'java'
+            plugins {
+                id("java")
+            }
+            ${withJava11Toolchain()}
             ${mavenCentralRepository()}
             configurations { first {}; last {} }
             dependencies {
@@ -447,8 +449,13 @@ class TestingIntegrationTest extends JUnitMultiVersionIntegrationSpec {
     def "test can install an irreplaceable SecurityManager"() {
         given:
         executer.withStackTraceChecksDisabled()
+            .withToolchainDetectionEnabled()
+            .withToolchainDownloadEnabled()
         buildFile << """
-            apply plugin:'java'
+            plugins {
+                id("java")
+            }
+            ${withJava11Toolchain()}
             ${mavenCentralRepository()}
             dependencies { testImplementation 'junit:junit:4.13' }
         """
@@ -541,4 +548,53 @@ class TestingIntegrationTest extends JUnitMultiVersionIntegrationSpec {
             .testFailed("testFailingGetMessage", equalTo('Could not determine failure message for exception of type UsefulNPETest$1: java.lang.RuntimeException'))
     }
 
+    def "test thread name is reset after test execution"() {
+        when:
+        ignoreWhenJUnitPlatform()
+        buildFile << """
+            apply plugin: "java"
+            ${mavenCentralRepository()}
+            dependencies {
+                testImplementation "junit:junit:${NEWEST}"
+            }
+            test { useJUnit() }
+        """
+
+        and:
+        file("src/test/java/SomeTest.java") << threadNameCheckTest("SomeTest")
+        file("src/test/java/AnotherTest.java") << threadNameCheckTest("AnotherTest")
+
+        then:
+        succeeds "clean", "test"
+
+        and:
+        def result = new DefaultTestExecutionResult(testDirectory)
+        result.testClass("SomeTest").assertTestPassed("checkThreadName")
+        result.testClass("AnotherTest").assertTestPassed("checkThreadName")
+    }
+
+    private static String threadNameCheckTest(String className) {
+        return """
+            import org.junit.Test;
+            import static org.junit.Assert.assertEquals;
+
+            public class ${className} {
+                @Test
+                public void checkThreadName() {
+                    assertEquals("Test worker", Thread.currentThread().getName());
+                    Thread.currentThread().setName(getClass().getSimpleName());
+                }
+            }
+        """
+    }
+
+    private static String withJava11Toolchain() {
+        return """
+            java {
+                toolchain {
+                    languageVersion = JavaLanguageVersion.of(11)
+                }
+            }
+        """
+    }
 }

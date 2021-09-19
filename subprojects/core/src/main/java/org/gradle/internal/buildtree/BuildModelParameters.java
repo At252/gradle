@@ -24,11 +24,24 @@ public class BuildModelParameters {
     private final boolean configureOnDemand;
     private final boolean configurationCache;
     private final boolean isolatedProjects;
+    private final boolean requiresBuildModel;
+    private final boolean parallelToolingApiActions;
 
-    public BuildModelParameters(boolean configureOnDemand, boolean configurationCache, boolean isolatedProjects) {
+    public BuildModelParameters(boolean configureOnDemand, boolean configurationCache, boolean isolatedProjects, boolean requiresBuildModel, boolean parallelToolingApiActions) {
         this.configureOnDemand = configureOnDemand;
         this.configurationCache = configurationCache;
         this.isolatedProjects = isolatedProjects;
+        this.requiresBuildModel = requiresBuildModel;
+        this.parallelToolingApiActions = parallelToolingApiActions;
+    }
+
+    /**
+     * Will the build model, that is the configured Gradle and Project objects, be required during the build execution?
+     *
+     * <p>When the build model is not required, certain state can be discarded.
+     */
+    public boolean isRequiresBuildModel() {
+        return requiresBuildModel;
     }
 
     public boolean isConfigureOnDemand() {
@@ -41,5 +54,12 @@ public class BuildModelParameters {
 
     public boolean isIsolatedProjects() {
         return isolatedProjects;
+    }
+
+    /**
+     * Force parallel tooling API actions? When true, always use parallel execution, when false use a default value.
+     */
+    public boolean isParallelToolingApiActions() {
+        return parallelToolingApiActions;
     }
 }

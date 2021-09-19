@@ -81,6 +81,7 @@ import org.gradle.api.tasks.OutputFile;
 import org.gradle.api.tasks.OutputFiles;
 import org.gradle.api.tasks.PathSensitive;
 import org.gradle.api.tasks.SkipWhenEmpty;
+import org.gradle.api.tasks.Untracked;
 import org.gradle.api.tasks.options.OptionValues;
 import org.gradle.cache.internal.CrossBuildInMemoryCacheFactory;
 import org.gradle.internal.instantiation.InstantiationScheme;
@@ -92,6 +93,7 @@ import org.gradle.util.internal.ClosureBackedAction;
 import org.gradle.util.internal.ConfigureUtil;
 import org.gradle.work.DisableCachingByDefault;
 import org.gradle.work.Incremental;
+import org.gradle.work.NormalizeLineEndings;
 
 import java.lang.annotation.Annotation;
 import java.util.Collection;
@@ -221,7 +223,9 @@ public class ExecutionGlobalServices {
                 Optional.class,
                 PathSensitive.class,
                 SkipWhenEmpty.class,
-                IgnoreEmptyDirectories.class
+                IgnoreEmptyDirectories.class,
+                NormalizeLineEndings.class,
+                Untracked.class
             ),
             instantiationScheme);
         return new TaskScheme(instantiationScheme, inspectionScheme);

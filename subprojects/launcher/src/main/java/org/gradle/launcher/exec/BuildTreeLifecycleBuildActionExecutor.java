@@ -16,26 +16,47 @@
 
 package org.gradle.launcher.exec;
 
+import org.gradle.internal.build.BuildLayoutValidator;
+import org.gradle.internal.buildtree.BuildActionModelRequirements;
 import org.gradle.internal.buildtree.BuildActionRunner;
-import org.gradle.internal.buildtree.BuildTreeState;
 import org.gradle.internal.buildtree.BuildTreeModelControllerServices;
+import org.gradle.internal.buildtree.BuildTreeState;
+import org.gradle.internal.buildtree.RunTasksRequirements;
 import org.gradle.internal.invocation.BuildAction;
 import org.gradle.internal.session.BuildSessionActionExecutor;
 import org.gradle.internal.session.BuildSessionContext;
+import org.gradle.tooling.internal.provider.action.BuildModelAction;
+import org.gradle.tooling.internal.provider.action.ClientProvidedBuildAction;
+import org.gradle.tooling.internal.provider.action.ClientProvidedPhasedAction;
 
 /**
  * A {@link BuildActionExecuter} responsible for establishing the build tree for a single invocation of a {@link BuildAction}.
  */
 public class BuildTreeLifecycleBuildActionExecutor implements BuildSessionActionExecutor {
     private final BuildTreeModelControllerServices buildTreeModelControllerServices;
+    private final BuildLayoutValidator buildLayoutValidator;
 
-    public BuildTreeLifecycleBuildActionExecutor(BuildTreeModelControllerServices buildTreeModelControllerServices) {
+    public BuildTreeLifecycleBuildActionExecutor(BuildTreeModelControllerServices buildTreeModelControllerServices, BuildLayoutValidator buildLayoutValidator) {
         this.buildTreeModelControllerServices = buildTreeModelControllerServices;
+        this.buildLayoutValidator = buildLayoutValidator;
     }
 
     @Override
     public BuildActionRunner.Result execute(BuildAction action, BuildSessionContext buildSession) {
-        BuildTreeModelControllerServices.Supplier modelServices = buildTreeModelControllerServices.servicesForBuildTree(action.isRunTasks(), action.isCreateModel(), action.getStartParameter());
+        buildLayoutValidator.validate(action.getStartParameter());
+
+        BuildActionModelRequirements actionRequirements;
+        if (action instanceof BuildModelAction && action.isCreateModel()) {
+            BuildModelAction buildModelAction = (BuildModelAction) action;
+            actionRequirements = new QueryModelRequirements(action.getStartParameter(), action.isRunTasks(), buildModelAction.getModelName());
+        } else if (action instanceof ClientProvidedBuildAction) {
+            actionRequirements = new RunActionRequirements(action.getStartParameter(), action.isRunTasks());
+        } else if (action instanceof ClientProvidedPhasedAction) {
+            actionRequirements = new RunPhasedActionRequirements(action.getStartParameter(), action.isRunTasks());
+        } else {
+            actionRequirements = new RunTasksRequirements(action.getStartParameter());
+        }
+        BuildTreeModelControllerServices.Supplier modelServices = buildTreeModelControllerServices.servicesForBuildTree(actionRequirements);
         try (BuildTreeState buildTree = new BuildTreeState(buildSession.getServices(), modelServices)) {
             return buildTree.run(context -> context.execute(action));
         }

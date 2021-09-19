@@ -21,6 +21,8 @@ import org.gradle.api.file.FileCollection;
 import org.gradle.api.tasks.FileNormalizer;
 import org.gradle.internal.fingerprint.CurrentFileCollectionFingerprint;
 import org.gradle.internal.fingerprint.DirectorySensitivity;
+import org.gradle.internal.fingerprint.FileCollectionFingerprint;
+import org.gradle.internal.fingerprint.LineEndingSensitivity;
 import org.gradle.internal.snapshot.ValueSnapshot;
 
 import javax.annotation.Nullable;
@@ -30,10 +32,11 @@ import java.util.function.Supplier;
 public interface InputFingerprinter {
     Result fingerprintInputProperties(
         ImmutableSortedMap<String, ValueSnapshot> previousValueSnapshots,
-        ImmutableSortedMap<String, ValueSnapshot> knownValueSnapshots,
-        ImmutableSortedMap<String, CurrentFileCollectionFingerprint> knownFingerprints,
+        ImmutableSortedMap<String, ? extends FileCollectionFingerprint> previousFingerprints,
+        ImmutableSortedMap<String, ValueSnapshot> knownCurrentValueSnapshots,
+        ImmutableSortedMap<String, CurrentFileCollectionFingerprint> knownCurrentFingerprints,
         Consumer<InputVisitor> inputs
-    );
+    ) throws InputFingerprintingException, InputFileFingerprintingException;
 
     /**
      * Hack require to get normalized input path without fingerprinting contents.
@@ -97,12 +100,20 @@ public interface InputFingerprinter {
         private final Object value;
         private final Class<? extends FileNormalizer> normalizer;
         private final DirectorySensitivity directorySensitivity;
+        private final LineEndingSensitivity lineEndingSensitivity;
         private final Supplier<FileCollection> files;
 
-        public FileValueSupplier(@Nullable Object value, Class<? extends FileNormalizer> normalizer, DirectorySensitivity directorySensitivity, Supplier<FileCollection> files) {
+        public FileValueSupplier(
+            @Nullable Object value,
+            Class<? extends FileNormalizer> normalizer,
+            DirectorySensitivity directorySensitivity,
+            LineEndingSensitivity lineEndingSensitivity,
+            Supplier<FileCollection> files
+        ) {
             this.value = value;
             this.normalizer = normalizer;
             this.directorySensitivity = directorySensitivity;
+            this.lineEndingSensitivity = lineEndingSensitivity;
             this.files = files;
         }
 
@@ -120,6 +131,10 @@ public interface InputFingerprinter {
             return directorySensitivity;
         }
 
+        public LineEndingSensitivity getLineEndingNormalization() {
+            return lineEndingSensitivity;
+        }
+
         public FileCollection getFiles() {
             return files.get();
         }
@@ -128,5 +143,36 @@ public interface InputFingerprinter {
     interface Result {
         ImmutableSortedMap<String, ValueSnapshot> getValueSnapshots();
         ImmutableSortedMap<String, CurrentFileCollectionFingerprint> getFileFingerprints();
+    }
+
+    class InputFingerprintingException extends RuntimeException {
+        private final String propertyName;
+
+        public InputFingerprintingException(String propertyName, String message, Throwable cause) {
+            super(String.format("Cannot fingerprint input property '%s': %s.", propertyName, message), cause);
+            this.propertyName = propertyName;
+        }
+
+        public String getPropertyName() {
+            return propertyName;
+        }
+    }
+
+    class InputFileFingerprintingException extends RuntimeException {
+        private final String propertyName;
+
+        public InputFileFingerprintingException(String propertyName, Throwable cause) {
+            super(String.format("Cannot fingerprint input file property '%s'.", propertyName), cause);
+            this.propertyName = propertyName;
+        }
+
+        private InputFileFingerprintingException(String formattedMessage, Throwable cause, String propertyName) {
+            super(formattedMessage, cause);
+            this.propertyName = propertyName;
+        }
+
+        public String getPropertyName() {
+            return propertyName;
+        }
     }
 }

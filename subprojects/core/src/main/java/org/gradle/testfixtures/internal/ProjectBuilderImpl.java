@@ -17,13 +17,12 @@
 package org.gradle.testfixtures.internal;
 
 import org.gradle.api.Project;
+import org.gradle.api.artifacts.ModuleVersionIdentifier;
 import org.gradle.api.artifacts.component.BuildIdentifier;
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier;
 import org.gradle.api.internal.GradleInternal;
-import org.gradle.api.internal.SettingsInternal;
 import org.gradle.api.internal.StartParameterInternal;
 import org.gradle.api.internal.artifacts.DefaultBuildIdentifier;
-import org.gradle.api.internal.artifacts.DefaultProjectComponentIdentifier;
 import org.gradle.api.internal.file.FileResolver;
 import org.gradle.api.internal.file.temp.DefaultTemporaryFileProvider;
 import org.gradle.api.internal.file.temp.TemporaryFileProvider;
@@ -40,15 +39,20 @@ import org.gradle.initialization.NoOpBuildEventConsumer;
 import org.gradle.initialization.ProjectDescriptorRegistry;
 import org.gradle.internal.Factory;
 import org.gradle.internal.FileUtils;
+import org.gradle.internal.Pair;
 import org.gradle.internal.SystemProperties;
 import org.gradle.internal.build.AbstractBuildState;
+import org.gradle.internal.build.BuildLifecycleController;
 import org.gradle.internal.build.BuildState;
 import org.gradle.internal.build.BuildStateRegistry;
+import org.gradle.internal.build.BuildWorkGraph;
 import org.gradle.internal.build.RootBuildState;
-import org.gradle.internal.buildtree.BuildTreeState;
 import org.gradle.internal.buildtree.BuildTreeLifecycleController;
 import org.gradle.internal.buildtree.BuildTreeModelControllerServices;
+import org.gradle.internal.buildtree.BuildTreeState;
+import org.gradle.internal.buildtree.RunTasksRequirements;
 import org.gradle.internal.classpath.ClassPath;
+import org.gradle.internal.composite.IncludedBuildInternal;
 import org.gradle.internal.concurrent.Stoppable;
 import org.gradle.internal.logging.services.LoggingServiceRegistry;
 import org.gradle.internal.nativeintegration.services.NativeServices;
@@ -68,6 +72,7 @@ import org.gradle.util.Path;
 import javax.annotation.Nullable;
 import java.io.File;
 import java.util.Collections;
+import java.util.Set;
 import java.util.function.Function;
 
 import static org.gradle.internal.concurrent.CompositeStoppable.stoppable;
@@ -102,7 +107,7 @@ public class ProjectBuilderImpl {
         File userHomeDir = gradleUserHomeDir == null ? new File(projectDir, "userHome") : FileUtils.canonicalize(gradleUserHomeDir);
         StartParameterInternal startParameter = new StartParameterInternal();
         startParameter.setGradleUserHomeDir(userHomeDir);
-        NativeServices.initialize(userHomeDir);
+        NativeServices.initializeOnDaemon(userHomeDir);
 
         final ServiceRegistry globalServices = getGlobalServices();
 
@@ -110,7 +115,7 @@ public class ProjectBuilderImpl {
         CrossBuildSessionState crossBuildSessionState = new CrossBuildSessionState(globalServices, startParameter);
         GradleUserHomeScopeServiceRegistry userHomeServices = userHomeServicesOf(globalServices);
         BuildSessionState buildSessionState = new BuildSessionState(userHomeServices, crossBuildSessionState, startParameter, buildRequestMetaData, ClassPath.EMPTY, new DefaultBuildCancellationToken(), buildRequestMetaData.getClient(), new NoOpBuildEventConsumer());
-        BuildTreeModelControllerServices.Supplier modelServices = buildSessionState.getServices().get(BuildTreeModelControllerServices.class).servicesForBuildTree(true, false, startParameter);
+        BuildTreeModelControllerServices.Supplier modelServices = buildSessionState.getServices().get(BuildTreeModelControllerServices.class).servicesForBuildTree(new RunTasksRequirements(startParameter));
         BuildTreeState buildTreeState = new BuildTreeState(buildSessionState.getServices(), modelServices);
         TestBuildScopeServices buildServices = new TestBuildScopeServices(buildTreeState.getServices(), homeDir, startParameter);
         TestRootBuild build = new TestRootBuild(projectDir, buildServices);
@@ -147,7 +152,7 @@ public class ProjectBuilderImpl {
                 (Stoppable) workerLeaseService::releaseCurrentProjectLocks,
                 (Stoppable) ((DefaultWorkerLeaseService) workerLeaseService)::releaseCurrentResourceLocks,
                 buildServices,
-                    buildTreeState,
+                buildTreeState,
                 buildSessionState,
                 crossBuildSessionState
             )
@@ -224,6 +229,20 @@ public class ProjectBuilderImpl {
         }
 
         @Override
+        protected BuildLifecycleController getBuildController() {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void ensureProjectsLoaded() {
+        }
+
+        @Override
+        public BuildWorkGraph getWorkGraph() {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
         protected ProjectStateRegistry getProjectStateRegistry() {
             return projectStateRegistry;
         }
@@ -244,17 +263,12 @@ public class ProjectBuilderImpl {
         }
 
         @Override
-        public SettingsInternal getLoadedSettings() {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
         public Path getCurrentPrefixForProjectsInChildBuilds() {
             return Path.ROOT;
         }
 
         @Override
-        public Path getIdentityPathForProject(Path projectPath) {
+        public Path calculateIdentityPathForProject(Path projectPath) {
             return projectPath;
         }
 
@@ -269,12 +283,18 @@ public class ProjectBuilderImpl {
         }
 
         @Override
-        public ProjectComponentIdentifier getIdentifierForProject(Path projectPath) {
-            String name = projectPath.getName();
-            if (name == null) {
-                name = "root";
-            }
-            return new DefaultProjectComponentIdentifier(getBuildIdentifier(), projectPath, projectPath, name);
+        public IncludedBuildInternal getModel() {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Set<Pair<ModuleVersionIdentifier, ProjectComponentIdentifier>> getAvailableModules() {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public ProjectComponentIdentifier idToReferenceProjectFromAnotherBuild(ProjectComponentIdentifier identifier) {
+            throw new UnsupportedOperationException();
         }
 
         @Override

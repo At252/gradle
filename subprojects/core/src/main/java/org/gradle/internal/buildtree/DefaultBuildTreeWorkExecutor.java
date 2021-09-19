@@ -16,28 +16,24 @@
 
 package org.gradle.internal.buildtree;
 
-import org.gradle.composite.internal.IncludedBuildControllers;
+import org.gradle.composite.internal.IncludedBuildTaskGraph;
 import org.gradle.internal.build.BuildLifecycleController;
-
-import java.util.function.Consumer;
+import org.gradle.internal.build.ExecutionResult;
 
 public class DefaultBuildTreeWorkExecutor implements BuildTreeWorkExecutor {
-    private final IncludedBuildControllers includedBuildControllers;
+    private final IncludedBuildTaskGraph includedBuildTaskGraph;
     private final BuildLifecycleController buildController;
 
-    public DefaultBuildTreeWorkExecutor(IncludedBuildControllers includedBuildControllers, BuildLifecycleController buildController) {
-        this.includedBuildControllers = includedBuildControllers;
+    public DefaultBuildTreeWorkExecutor(IncludedBuildTaskGraph includedBuildTaskGraph, BuildLifecycleController buildController) {
+        this.includedBuildTaskGraph = includedBuildTaskGraph;
         this.buildController = buildController;
     }
 
     @Override
-    public void execute(Consumer<? super Throwable> failures) {
-        includedBuildControllers.startTaskExecution();
-        try {
-            buildController.executeTasks();
-        } catch (Exception e) {
-            failures.accept(e);
-        }
-        includedBuildControllers.awaitTaskCompletion(failures);
+    public ExecutionResult<Void> execute() {
+        includedBuildTaskGraph.startTaskExecution();
+        ExecutionResult<Void> buildResult = buildController.executeTasks();
+        ExecutionResult<Void> includedBuildsResult = includedBuildTaskGraph.awaitTaskCompletion();
+        return buildResult.withFailures(includedBuildsResult);
     }
 }

@@ -19,6 +19,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 import com.google.common.io.Files;
+import org.bouncycastle.bcpg.ArmoredOutputStream;
 import org.bouncycastle.openpgp.PGPPublicKey;
 import org.bouncycastle.openpgp.PGPPublicKeyRing;
 import org.gradle.api.Action;
@@ -38,6 +39,7 @@ import org.gradle.api.internal.artifacts.verification.model.ChecksumKind;
 import org.gradle.api.internal.artifacts.verification.model.IgnoredKey;
 import org.gradle.api.internal.artifacts.verification.serializer.DependencyVerificationsXmlReader;
 import org.gradle.api.internal.artifacts.verification.serializer.DependencyVerificationsXmlWriter;
+import org.gradle.api.internal.artifacts.verification.signatures.BuildTreeDefinedKeys;
 import org.gradle.api.internal.artifacts.verification.signatures.SignatureVerificationResultBuilder;
 import org.gradle.api.internal.artifacts.verification.signatures.SignatureVerificationService;
 import org.gradle.api.internal.artifacts.verification.signatures.SignatureVerificationServiceFactory;
@@ -70,7 +72,9 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.math.BigInteger;
+import java.nio.charset.StandardCharsets;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
@@ -99,7 +103,7 @@ public class WriteDependencyVerificationFile implements DependencyVerificationOv
     private final Set<VerificationEntry> entriesToBeWritten = Sets.newLinkedHashSetWithExpectedSize(512);
     private final ChecksumService checksumService;
     private final File verificationFile;
-    private final File keyringsFile;
+    private final BuildTreeDefinedKeys keyrings;
     private final SignatureVerificationServiceFactory signatureVerificationServiceFactory;
     private final boolean isDryRun;
     private final boolean generatePgpInfo;
@@ -109,18 +113,21 @@ public class WriteDependencyVerificationFile implements DependencyVerificationOv
     private boolean hasMissingKeys = false;
     private boolean hasFailedVerification = false;
 
-    public WriteDependencyVerificationFile(File gradleDir,
-                                           BuildOperationExecutor buildOperationExecutor,
-                                           List<String> checksums,
-                                           ChecksumService checksumService,
-                                           SignatureVerificationServiceFactory signatureVerificationServiceFactory,
-                                           boolean isDryRun,
-                                           boolean exportKeyRing) {
+    public WriteDependencyVerificationFile(
+        File verificationFile,
+        BuildTreeDefinedKeys keyrings,
+        BuildOperationExecutor buildOperationExecutor,
+        List<String> checksums,
+        ChecksumService checksumService,
+        SignatureVerificationServiceFactory signatureVerificationServiceFactory,
+        boolean isDryRun,
+        boolean exportKeyRing
+    ) {
         this.buildOperationExecutor = buildOperationExecutor;
         this.checksums = checksums;
         this.checksumService = checksumService;
-        this.verificationFile = DependencyVerificationOverride.dependencyVerificationsFile(gradleDir);
-        this.keyringsFile = DependencyVerificationOverride.keyringsFile(gradleDir);
+        this.verificationFile = verificationFile;
+        this.keyrings = keyrings;
         this.signatureVerificationServiceFactory = signatureVerificationServiceFactory;
         this.isDryRun = isDryRun;
         this.generatePgpInfo = checksums.contains(PGP);
@@ -167,10 +174,17 @@ public class WriteDependencyVerificationFile implements DependencyVerificationOv
     public void buildFinished(Gradle gradle) {
         ensureOutputDirCreated();
         maybeReadExistingFile();
+        // when we generate the verification file, we intentionally ignore if the "use key servers" flag is false
+        // because otherwise it forces the user to remove the option in the XML file, generate, then switch it back.
+        boolean offline = gradle.getStartParameter().isOffline();
         SignatureVerificationService signatureVerificationService = signatureVerificationServiceFactory.create(
-            keyringsFile,
-            DefaultKeyServers.getOrDefaults(verificationsBuilder.getKeyServers())
+            keyrings,
+            DefaultKeyServers.getOrDefaults(verificationsBuilder.getKeyServers()),
+            !offline
         );
+        if (!verificationsBuilder.isUseKeyServers() && !offline) {
+            LOGGER.lifecycle("Will use key servers to download missing keys. If you really want to ignore key servers when generating the verification file, you can use the --offline flag in addition");
+        }
         try {
             validateChecksums();
             resolveAllConfigurationsConcurrently(gradle);
@@ -207,8 +221,10 @@ public class WriteDependencyVerificationFile implements DependencyVerificationOv
     }
 
     private void exportKeys(SignatureVerificationService signatureVerificationService, DependencyVerifier verifier) throws IOException {
-        String keyringFileName = isDryRun ? VERIFICATION_KEYRING_DRYRUN_GPG : VERIFICATION_KEYRING_GPG;
-        File keyringExportFile = new File(verificationFile.getParent(), keyringFileName);
+        BuildTreeDefinedKeys keys = keyrings;
+        if(isDryRun) {
+            keys = keyrings.dryRun();
+        }
         Set<String> keysToExport = Sets.newHashSet();
         verifier.getConfiguration()
             .getTrustedKeys()
@@ -225,7 +241,7 @@ public class WriteDependencyVerificationFile implements DependencyVerificationOv
             .flatMap(md -> md.getArtifactVerifications().stream())
             .flatMap(avm -> Stream.concat(avm.getTrustedPgpKeys().stream(), avm.getIgnoredPgpKeys().stream().map(IgnoredKey::getKeyId)))
             .forEach(keysToExport::add);
-        exportKeyRingCollection(signatureVerificationService.getPublicKeyService(), keyringExportFile, keysToExport);
+        exportKeyRingCollection(signatureVerificationService.getPublicKeyService(), keys, keysToExport);
     }
 
     private void maybeReadExistingFile() {
@@ -468,8 +484,8 @@ public class WriteDependencyVerificationFile implements DependencyVerificationOv
         cnf.getIncoming().artifactView(MODULE_COMPONENT_FILES).getFiles().getFiles();
     }
 
-    private void exportKeyRingCollection(PublicKeyService publicKeyService, File keyringFile, Set<String> publicKeys) throws IOException {
-        List<PGPPublicKeyRing> existingRings = loadExistingKeyRing(keyringFile);
+    private void exportKeyRingCollection(PublicKeyService publicKeyService, BuildTreeDefinedKeys keyrings, Set<String> publicKeys) throws IOException {
+        List<PGPPublicKeyRing> existingRings = loadExistingKeyRing(keyrings);
         PGPPublicKeyRingListBuilder builder = new PGPPublicKeyRingListBuilder();
         for (String publicKey : publicKeys) {
             if (publicKey.length() <= 16) {
@@ -488,12 +504,56 @@ public class WriteDependencyVerificationFile implements DependencyVerificationOv
             .addAll(existingRings)
             .addAll(keysSeenInVerifier)
             .build();
+        File keyringFile = keyrings.getBinaryKeyringsFile();
+        writeBinaryKeyringFile(keyringFile, allKeyRings);
+        File asciiArmoredFile = keyrings.getAsciiKeyringsFile();
+        writeAsciiArmoredKeyRingFile(asciiArmoredFile, allKeyRings);
+        LOGGER.lifecycle("Exported {} keys to {} and {}", allKeyRings.size(), keyringFile, asciiArmoredFile);
+    }
+
+    private void writeAsciiArmoredKeyRingFile(File ascii, ImmutableList<PGPPublicKeyRing> allKeyRings) throws IOException {
+        if (ascii.exists()) {
+            ascii.delete();
+        }
+        boolean hasKey = false;
+        for (PGPPublicKeyRing keyRing : allKeyRings) {
+            // First let's write some human readable info about the keyring being serialized
+            try (OutputStream out = new FileOutputStream(ascii, true)) {
+                if (hasKey) {
+                    out.write('\n');
+                }
+                Iterator<PGPPublicKey> pks = keyRing.getPublicKeys();
+                while (pks.hasNext()) {
+                    boolean hasUid = false;
+                    PGPPublicKey pk = pks.next();
+                    String keyType = pk.isMasterKey() ? "pub" : "sub";
+                    out.write((keyType + "    " + SecuritySupport.toLongIdHexString(pk.getKeyID()).toUpperCase() + "\n").getBytes(StandardCharsets.US_ASCII));
+                    Iterator<String> userIDs = pk.getUserIDs();
+                    while (userIDs.hasNext()) {
+                        hasUid = true;
+                        String uid = userIDs.next();
+                        out.write(("uid    " + uid + "\n").getBytes(StandardCharsets.US_ASCII));
+                    }
+                    if (hasUid) {
+                        out.write('\n');
+                    }
+                }
+            }
+            // Then write the ascii armored keyring
+            try (FileOutputStream fos = new FileOutputStream(ascii, true);
+                 ArmoredOutputStream out = new ArmoredOutputStream(fos)) {
+                keyRing.encode(out, true);
+            }
+            hasKey = true;
+        }
+    }
+
+    private void writeBinaryKeyringFile(File keyringFile, ImmutableList<PGPPublicKeyRing> allKeyRings) throws IOException {
         try (OutputStream out = new FileOutputStream(keyringFile)) {
             for (PGPPublicKeyRing keyRing : allKeyRings) {
                 keyRing.encode(out, true);
             }
         }
-        LOGGER.lifecycle("Exported {} keys to {}", allKeyRings.size(), keyringFile);
     }
 
     private static class PGPPublicKeyRingListBuilder implements PublicKeyResultBuilder {
@@ -517,10 +577,10 @@ public class WriteDependencyVerificationFile implements DependencyVerificationOv
         return ring.getPublicKeys().hasNext();
     }
 
-    private List<PGPPublicKeyRing> loadExistingKeyRing(File keyringFile) throws IOException {
+    private List<PGPPublicKeyRing> loadExistingKeyRing(BuildTreeDefinedKeys keyrings) throws IOException {
         List<PGPPublicKeyRing> existingRings;
-        if (!isDryRun && keyringFile.exists()) {
-            existingRings = SecuritySupport.loadKeyRingFile(keyringFile);
+        if (!isDryRun) {
+            existingRings = keyrings.loadKeys();
             LOGGER.info("Existing keyring file contains {} keyrings", existingRings.size());
         } else {
             existingRings = Collections.emptyList();

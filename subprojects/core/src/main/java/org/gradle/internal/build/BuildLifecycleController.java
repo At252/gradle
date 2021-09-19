@@ -17,6 +17,7 @@ package org.gradle.internal.build;
 
 import org.gradle.api.internal.GradleInternal;
 import org.gradle.api.internal.SettingsInternal;
+import org.gradle.execution.taskgraph.TaskExecutionGraphInternal;
 import org.gradle.internal.concurrent.Stoppable;
 
 import javax.annotation.Nullable;
@@ -46,27 +47,38 @@ public interface BuildLifecycleController extends Stoppable {
     GradleInternal getConfiguredBuild();
 
     /**
-     * Schedules the specified tasks for this build. Configures the build, if necessary.
+     * Prepares this build to schedule tasks. May configure the build, if required to later schedule the requested tasks. Can be called multiple times.
      */
-    void scheduleTasks(final Iterable<String> tasks);
+    void prepareToScheduleTasks();
 
     /**
-     * Schedule requested tasks, as defined in the {@link org.gradle.StartParameter} for this build. Configures the build, if necessary.
+     * Adds requested tasks, as defined in the {@link org.gradle.StartParameter}, and their dependencies to the work graph for this build.
+     * Must call {@link #prepareToScheduleTasks()} prior to calling this method.
      */
     void scheduleRequestedTasks();
 
     /**
-     * Executes the tasks scheduled for this build. Does not automatically configure the build or schedule any tasks.
+     * Populates the work graph of this build.
+     * Must call {@link #prepareToScheduleTasks()} prior to calling this method.
      */
-    void executeTasks();
+    void populateWorkGraph(Consumer<? super TaskExecutionGraphInternal> action);
+
+    void finalizeWorkGraph(boolean workScheduled);
+
+    /**
+     * Executes the tasks scheduled for this build. Does not automatically configure the build or schedule any tasks.
+     * Must call {@link #prepareToScheduleTasks()} and optionally any of {@link #scheduleRequestedTasks()} or {@link #populateWorkGraph(Consumer)} prior to calling this method.
+     */
+    ExecutionResult<Void> executeTasks();
 
     /**
      * Calls the `buildFinished` hooks and other user code clean up.
      * Failures to finish the build are passed to the given consumer rather than thrown.
      *
      * @param failure The build failure that should be reported to the buildFinished hooks. When null, this launcher may use whatever failure it has already collected.
+     * @return a result containing any failures that happen while finishing the build.
      */
-    void finishBuild(@Nullable Throwable failure, Consumer<? super Throwable> collector);
+    ExecutionResult<Void> finishBuild(@Nullable Throwable failure);
 
     /**
      * <p>Adds a listener to this build instance. Receives events for this build only.

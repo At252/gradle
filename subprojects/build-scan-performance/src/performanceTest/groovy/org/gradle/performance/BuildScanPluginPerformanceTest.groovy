@@ -44,6 +44,8 @@ class BuildScanPluginPerformanceTest extends AbstractBuildScanPluginPerformanceT
             invocationCount INVOCATIONS
             displayName(WITHOUT_PLUGIN_LABEL)
             invocation {
+                // Increase client VM heap memory because of a huge amount of output events
+                clientJvmArgs("-Xmx256m", "-Xms256m")
                 args(*jobArgs)
                 tasksToRun(*tasks)
                 if (withFailure) {
@@ -62,6 +64,8 @@ class BuildScanPluginPerformanceTest extends AbstractBuildScanPluginPerformanceT
             invocationCount INVOCATIONS
             displayName(WITH_PLUGIN_LABEL)
             invocation {
+                // Increase client VM heap memory because of a huge amount of output events
+                clientJvmArgs("-Xmx256m", "-Xms256m")
                 args(*jobArgs)
                 args("-DenableScan=true")
                 tasksToRun(*tasks)
@@ -123,8 +127,12 @@ class BuildScanPluginPerformanceTest extends AbstractBuildScanPluginPerformanceT
         void afterBuild(BuildContext context, Throwable t) {
             assert !new File(projectDir, 'error.log').exists()
             def buildCacheDirectory = new TestFile(projectDir, 'local-build-cache')
-            def cacheEntries = buildCacheDirectory.listFiles().sort()
-            cacheEntries.eachWithIndex { TestFile entry, int i ->
+            def cacheEntries = buildCacheDirectory.listFiles()
+            if (cacheEntries == null) {
+                throw new IllegalStateException("Cache dir doesn't exist, did the build succeed? Please check the build log.")
+            }
+
+            cacheEntries.sort().eachWithIndex { TestFile entry, int i ->
                 if (i % 2 == 0) {
                     entry.delete()
                 }
@@ -179,10 +187,11 @@ class BuildScanPluginPerformanceTest extends AbstractBuildScanPluginPerformanceT
                     buildscript {
                         repositories {
                             maven {
-                                url 'https://repo.gradle.org/gradle/enterprise-libs-snapshots-local/'
+                                name 'gradleInternalRepository'
+                                url '${System.getenv("GRADLE_INTERNAL_REPO_URL")}/enterprise-libs-snapshots-local/'
                                 credentials {
-                                    username = System.getenv("ARTIFACTORY_USERNAME")
-                                    password = System.getenv("ARTIFACTORY_PASSWORD")
+                                    username = System.getenv("GRADLE_INTERNAL_REPO_USERNAME")
+                                    password = System.getenv("GRADLE_INTERNAL_REPO_PASSWORD")
                                 }
                                 authentication {
                                     basic(BasicAuthentication)

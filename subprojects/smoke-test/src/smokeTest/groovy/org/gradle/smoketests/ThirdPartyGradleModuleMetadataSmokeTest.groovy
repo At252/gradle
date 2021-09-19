@@ -35,14 +35,14 @@ class ThirdPartyGradleModuleMetadataSmokeTest extends AbstractSmokeTest {
         BuildResult result
         useSample("gmm-example")
         def kotlinVersion = TestedVersions.kotlin.latestStartsWith("1.4")
-        def androidPluginVersion = AGP_VERSIONS.getLatestOfMinor("4.1")
+        def androidPluginVersion = AGP_VERSIONS.getLatestOfMinor("4.2")
         def arch = OperatingSystem.current().macOsX ? 'MacosX64' : 'LinuxX64'
 
-        def expectedMetadata = new File(testProjectDir.root, 'expected-metadata')
-        def actualRepo = new File(testProjectDir.root, 'producer/repo')
+        def expectedMetadata = new File(testProjectDir, 'expected-metadata')
+        def actualRepo = new File(testProjectDir, 'producer/repo')
 
         when:
-        buildFile = new File(testProjectDir.root, "producer/${defaultBuildFileName}.kts")
+        buildFile = new File(testProjectDir, "producer/${defaultBuildFileName}.kts")
         replaceVariablesInBuildFile(
             kotlinVersion: kotlinVersion,
             androidPluginVersion: androidPluginVersion)
@@ -52,7 +52,7 @@ class ThirdPartyGradleModuleMetadataSmokeTest extends AbstractSmokeTest {
         actualRepo.eachFileRecurse { actual ->
             def expected = new File(expectedMetadata, actual.name)
             if (expected.name.endsWith('.pom')) {
-                assert expected.text == actual.text : "content mismatch: ${actual.name}]"
+                assert expected.text == actual.text: "content mismatch: ${actual.name}]"
             }
             if (expected.name.endsWith('.module')) {
                 compareJson(expected, actual)
@@ -60,7 +60,7 @@ class ThirdPartyGradleModuleMetadataSmokeTest extends AbstractSmokeTest {
         }
 
         when:
-        buildFile = new File(testProjectDir.root, "consumer/${defaultBuildFileName}.kts")
+        buildFile = new File(testProjectDir, "consumer/${defaultBuildFileName}.kts")
         replaceVariablesInBuildFile(
             kotlinVersion: kotlinVersion,
             androidPluginVersion: androidPluginVersion)
@@ -114,34 +114,43 @@ class ThirdPartyGradleModuleMetadataSmokeTest extends AbstractSmokeTest {
     }
 
     private static List<String> trimmedOutput(BuildResult result) {
-        result.output.split('\n').findAll { !it.empty && !it.contains('warning') }
+        result.output.split('\n').findAll { !it.empty && !it.toLowerCase().contains('warning') }
+    }
+
+    private static SmokeTestGradleRunner setIllegalAccessPermitForJDK16KotlinCompilerDaemonOptions(SmokeTestGradleRunner runner) {
+        if (JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_16)) {
+            // https://youtrack.jetbrains.com/issue/KT-44266#focus=Comments-27-4639508.0-0
+            runner.withJvmArguments("-Dkotlin.daemon.jvm.options=" +
+                "--add-exports=java.base/sun.nio.ch=ALL-UNNAMED," +
+                "--add-opens=java.base/java.util=ALL-UNNAMED")
+        }
+        return runner
     }
 
     private BuildResult publish() {
-        runner('publish')
-            .withProjectDir(new File(testProjectDir.root, 'producer'))
+        setIllegalAccessPermitForJDK16KotlinCompilerDaemonOptions(runner('publish'))
+            .withProjectDir(new File(testProjectDir, 'producer'))
             .forwardOutput()
-            // expect legacy deprecation warnings because those are fixed in later versions of Android plugin
-            .expectLegacyDeprecationWarning("The AbstractCompile.destinationDir property has been deprecated. " +
+        // this deprecation is coming from the Kotlin plugin
+            .expectDeprecationWarning("The AbstractCompile.destinationDir property has been deprecated. " +
                 "This is scheduled to be removed in Gradle 8.0. " +
                 "Please use the destinationDirectory property instead. " +
-                "Consult the upgrading guide for further information: https://docs.gradle.org/${GradleVersion.current().version}/userguide/upgrading_version_7.html#compile_task_wiring")
-            .expectLegacyDeprecationWarning("The WorkerExecutor.submit() method has been deprecated. " +
-                "This is scheduled to be removed in Gradle 8.0. " +
-                "Please use the noIsolation(), classLoaderIsolation() or processIsolation() method instead. " +
-                "See https://docs.gradle.org/${GradleVersion.current().version}/userguide/upgrading_version_5.html#method_workerexecutor_submit_is_deprecated for more details.")
+                "Consult the upgrading guide for further information: https://docs.gradle.org/${GradleVersion.current().version}/userguide/upgrading_version_7.html#compile_task_wiring",
+                "https://youtrack.jetbrains.com/issue/KT-46019")
             .build()
     }
 
     private BuildResult consumer(String runTask) {
-        runner(runTask, '-q').withProjectDir(
-            new File(testProjectDir.root, 'consumer')).forwardOutput().build()
+        setIllegalAccessPermitForJDK16KotlinCompilerDaemonOptions(runner(runTask, '-q'))
+            .withProjectDir(new File(testProjectDir, 'consumer'))
+            .forwardOutput()
+            .build()
     }
 
-    // Reevaluate if this is still needed when upgrading android plugin. Currently required with version 4.1.2
+    // Reevaluate if this is still needed when upgrading android plugin. Currently required with version 4.2.2
     private BuildResult consumerWithJdk16WorkaroundForAndroidManifest(String runTask) {
         def runner = runner(runTask, '-q')
-            .withProjectDir(new File(testProjectDir.root, 'consumer'))
+            .withProjectDir(new File(testProjectDir, 'consumer'))
             .forwardOutput()
         if (JavaVersion.current().isJava9Compatible()) {
             runner.withJvmArguments("--add-opens", "java.base/java.io=ALL-UNNAMED")
@@ -153,8 +162,8 @@ class ThirdPartyGradleModuleMetadataSmokeTest extends AbstractSmokeTest {
         def actualJson = removeChangingDetails(new JsonSlurper().parseText(actual.text), actual.name)
         def expectedJson = removeChangingDetails(new JsonSlurper().parseText(expected.text), actual.name)
         assert actualJson.formatVersion == expectedJson.formatVersion
-        assert actualJson.component == expectedJson.component : "component content mismatch: ${actual.name}"
-        assert actualJson.variants as Set == expectedJson.variants as Set : "variants content mismatch: ${actual.name}"
+        assert actualJson.component == expectedJson.component: "component content mismatch: ${actual.name}"
+        assert actualJson.variants as Set == expectedJson.variants as Set: "variants content mismatch: ${actual.name}"
     }
 
     private static removeChangingDetails(moduleRoot, String metadataFileName) {

@@ -18,22 +18,28 @@ package org.gradle.api.internal.changedetection.state
 
 import com.google.common.collect.ImmutableSet
 import com.google.common.collect.Maps
-import com.google.common.io.ByteStreams
 import org.gradle.api.internal.file.archive.ZipEntry
+import org.gradle.internal.SystemProperties
+import org.gradle.internal.file.FileMetadata
+import org.gradle.internal.file.impl.DefaultFileMetadata
+import org.gradle.internal.fingerprint.hashing.RegularFileSnapshotContext
+import org.gradle.internal.fingerprint.hashing.ResourceHasher
+import org.gradle.internal.fingerprint.hashing.ZipEntryContext
 import org.gradle.internal.hash.Hasher
 import org.gradle.internal.hash.Hashing
-import org.gradle.internal.hash.HashingOutputStream
 import org.gradle.internal.snapshot.RegularFileSnapshot
-import org.junit.Rule
-import org.junit.rules.TemporaryFolder
+import org.gradle.internal.util.PropertiesUtils
 import spock.lang.Specification
+import spock.lang.TempDir
 import spock.lang.Unroll
 
+import java.nio.charset.Charset
+import java.nio.file.Files
 import java.util.function.Supplier
 
 @Unroll
 class PropertiesFileAwareClasspathResourceHasherTest extends Specification {
-    @Rule TemporaryFolder tmpdir = new TemporaryFolder()
+    @TempDir File tmpdir
     Map<String, ResourceEntryFilter> filters = Maps.newHashMap()
     ResourceHasher delegate = new RuntimeClasspathResourceHasher()
     ResourceHasher unfilteredHasher = new PropertiesFileAwareClasspathResourceHasher(delegate, PropertiesFileFilter.FILTER_NOTHING)
@@ -307,7 +313,7 @@ class PropertiesFileAwareClasspathResourceHasherTest extends Specification {
         Properties properties = new Properties()
         properties.putAll(attributes)
         ByteArrayOutputStream bos = new ByteArrayOutputStream()
-        properties.store(bos, comments)
+        PropertiesUtils.store(properties, bos, comments, Charset.defaultCharset(), SystemProperties.getInstance().lineSeparator)
         return zipEntry(path, bos.toByteArray())
     }
 
@@ -338,36 +344,36 @@ class PropertiesFileAwareClasspathResourceHasherTest extends Specification {
                 return bytes.length
             }
         }
-        return new ZipEntryContext(zipEntry, path, "foo.zip")
+        return new DefaultZipEntryContext(zipEntry, path, "foo.zip")
     }
 
     RegularFileSnapshotContext fileSnapshot(String path, Map<String, String> attributes, String comments = "") {
         Properties properties = new Properties()
         properties.putAll(attributes)
         ByteArrayOutputStream bos = new ByteArrayOutputStream()
-        properties.store(bos, comments)
+        PropertiesUtils.store(properties, bos, comments, Charset.defaultCharset(), SystemProperties.getInstance().lineSeparator)
         return fileSnapshot(path, bos.toByteArray())
     }
 
     RegularFileSnapshotContext fileSnapshot(String path, byte[] bytes) {
-        def dir = tmpdir.newFolder()
+        def dir = Files.createTempDirectory(tmpdir.toPath(), null).toFile()
         def file = new File(dir, path)
         file.parentFile.mkdirs()
         file << bytes
-        return Mock(RegularFileSnapshotContext) {
-            _ * getSnapshot() >> Mock(RegularFileSnapshot) {
-                _ * getAbsolutePath() >> file.absolutePath
-                _ * getHash() >> {
-                    HashingOutputStream hasher = Hashing.primitiveStreamHasher()
-                    ByteStreams.copy(new ByteArrayInputStream(bytes), hasher)
-                    return hasher.hash()
+        return new RegularFileSnapshotContext() {
+            @Override
+            Supplier<String[]> getRelativePathSegments() {
+                return new Supplier<String[]>() {
+                    @Override
+                    String[] get() {
+                        return path.split('/')
+                    }
                 }
             }
-            _ * getRelativePathSegments() >> new Supplier<String[]>() {
-                @Override
-                String[] get() {
-                    return path.split('/')
-                }
+
+            @Override
+            RegularFileSnapshot getSnapshot() {
+                return new RegularFileSnapshot(file.absolutePath, file.name, Hashing.hashBytes(bytes), DefaultFileMetadata.file(0L, bytes.size(), FileMetadata.AccessType.DIRECT))
             }
         }
     }

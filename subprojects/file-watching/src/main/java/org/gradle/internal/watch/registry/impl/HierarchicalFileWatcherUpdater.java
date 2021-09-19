@@ -54,19 +54,22 @@ import java.util.stream.Collectors;
  *   - remember the currently watched directories as old watched directories for the next build
  *   - remove everything that isn't watched from the virtual file system.
  */
-public class HierarchicalFileWatcherUpdater implements FileWatcherUpdater {
+public class HierarchicalFileWatcherUpdater extends AbstractFileWatcherUpdater {
     private static final Logger LOGGER = LoggerFactory.getLogger(HierarchicalFileWatcherUpdater.class);
 
-    private final FileWatcher fileWatcher;
-
     private final FileSystemLocationToWatchValidator locationToWatchValidator;
-    private final WatchableHierarchies watchableHierarchies;
+    private final MovedHierarchyHandler movedHierarchyHandler;
     private final WatchedHierarchies watchedHierarchies = new WatchedHierarchies();
 
-    public HierarchicalFileWatcherUpdater(FileWatcher fileWatcher, FileSystemLocationToWatchValidator locationToWatchValidator, WatchableHierarchies watchableHierarchies) {
-        this.fileWatcher = fileWatcher;
+    public HierarchicalFileWatcherUpdater(
+        FileWatcher fileWatcher,
+        FileSystemLocationToWatchValidator locationToWatchValidator,
+        WatchableHierarchies watchableHierarchies,
+        MovedHierarchyHandler movedHierarchyHandler
+    ) {
+        super(fileWatcher, watchableHierarchies);
         this.locationToWatchValidator = locationToWatchValidator;
-        this.watchableHierarchies = watchableHierarchies;
+        this.movedHierarchyHandler = movedHierarchyHandler;
     }
 
     @Override
@@ -93,7 +96,16 @@ public class HierarchicalFileWatcherUpdater implements FileWatcherUpdater {
     }
 
     @Override
-    public SnapshotHierarchy buildFinished(SnapshotHierarchy root, WatchMode watchMode, int maximumNumberOfWatchedHierarchies) {
+    protected SnapshotHierarchy doUpdateVfsOnBuildStarted(SnapshotHierarchy root) {
+        SnapshotHierarchy newRoot = movedHierarchyHandler.handleMovedHierarchies(root);
+        if (newRoot != root) {
+            updateWatchedHierarchies(newRoot);
+        }
+        return newRoot;
+    }
+
+    @Override
+    public SnapshotHierarchy updateVfsOnBuildFinished(SnapshotHierarchy root, WatchMode watchMode, int maximumNumberOfWatchedHierarchies) {
         WatchableHierarchies.Invalidator invalidator = (location, currentRoot) -> currentRoot.invalidate(location, SnapshotHierarchy.NodeDiffListener.NOOP);
         SnapshotHierarchy newRoot = watchableHierarchies.removeUnwatchableContent(
             root,
@@ -148,5 +160,14 @@ public class HierarchicalFileWatcherUpdater implements FileWatcherUpdater {
         FileSystemLocationToWatchValidator NO_VALIDATION = location -> {};
 
         void validateLocationToWatch(File location);
+    }
+
+    public interface MovedHierarchyHandler {
+        /**
+         * On Windows when watched hierarchies are moved, the OS does not send a notification,
+         * even though the VFS should be updated. Our best bet here is to cull any moved watch
+         * roots from the VFS at the start of every build.
+         */
+        SnapshotHierarchy handleMovedHierarchies(SnapshotHierarchy root);
     }
 }

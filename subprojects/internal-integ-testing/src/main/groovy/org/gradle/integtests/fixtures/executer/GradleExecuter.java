@@ -190,11 +190,6 @@ public interface GradleExecuter extends Stoppable {
     GradleExecuter withBuildCacheEnabled();
 
     /**
-     * Don't set temp folder explicitly.
-     */
-    GradleExecuter withNoExplicitTmpDir();
-
-    /**
      * Don't set native services dir explicitly.
      */
     GradleExecuter withNoExplicitNativeServicesDir();
@@ -318,14 +313,6 @@ public interface GradleExecuter extends Stoppable {
      * May or may not be the same directory as the build to be run.
      */
     TestDirectoryProvider getTestDirectoryProvider();
-
-    /**
-     * Default is enabled = true.
-     *
-     * All our tests should work with partial VFS invalidation.
-     * As soon as partial invalidation is enabled by default, we can remove this method and the field again.
-     */
-    GradleExecuter withPartialVfsInvalidation(boolean enabled);
 
     /**
      * Expects exactly one deprecation warning in the build output. If more than one warning is produced,

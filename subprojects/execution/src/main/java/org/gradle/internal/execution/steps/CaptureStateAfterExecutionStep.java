@@ -22,13 +22,20 @@ import org.gradle.internal.Try;
 import org.gradle.internal.execution.ExecutionResult;
 import org.gradle.internal.execution.OutputSnapshotter;
 import org.gradle.internal.execution.UnitOfWork;
-import org.gradle.internal.execution.history.AfterPreviousExecutionState;
+import org.gradle.internal.execution.history.AfterExecutionState;
 import org.gradle.internal.execution.history.BeforeExecutionState;
+import org.gradle.internal.execution.history.PreviousExecutionState;
+import org.gradle.internal.execution.history.impl.DefaultAfterExecutionState;
 import org.gradle.internal.id.UniqueId;
 import org.gradle.internal.operations.BuildOperationDescriptor;
 import org.gradle.internal.operations.BuildOperationExecutor;
 import org.gradle.internal.operations.BuildOperationType;
 import org.gradle.internal.snapshot.FileSystemSnapshot;
+import org.gradle.internal.time.Time;
+import org.gradle.internal.time.Timer;
+
+import java.time.Duration;
+import java.util.Optional;
 
 import static org.gradle.internal.execution.history.impl.OutputSnapshotUtil.filterOutputsAfterExecution;
 
@@ -52,23 +59,23 @@ public class CaptureStateAfterExecutionStep<C extends BeforeExecutionContext> ex
     @Override
     public CurrentSnapshotResult execute(UnitOfWork work, C context) {
         Result result = delegate.execute(work, context);
-        ImmutableSortedMap<String, FileSystemSnapshot> outputFilesProduceByWork = operation(
-            operationContext -> {
-                ImmutableSortedMap<String, FileSystemSnapshot> outputSnapshots = captureOutputs(work, context);
-                operationContext.setResult(Operation.Result.INSTANCE);
-                return outputSnapshots;
-            },
-            BuildOperationDescriptor
-                .displayName("Snapshot outputs after executing " + work.getDisplayName())
-                .details(Operation.Details.INSTANCE)
-        );
+        Timer timer = Time.startTimer();
+        Optional<AfterExecutionState> afterExecutionState = context.getBeforeExecutionState()
+            .flatMap(beforeExecutionState -> captureStateAfterExecution(work, context, beforeExecutionState));
+        long snapshotOutputDuration = timer.getElapsedMillis();
 
-        OriginMetadata originMetadata = new OriginMetadata(buildInvocationScopeId.asString(), work.markExecutionTime());
+        // The origin execution time is recorded as “work duration” + “output snapshotting duration”,
+        // As this is _roughly_ the amount of time that is avoided by reusing the outputs,
+        // which is currently the _only_ thing this value is used for.
+        Duration duration = result.getDuration();
+        Duration originExecutionTime = duration.plus(Duration.ofMillis(snapshotOutputDuration));
+
+        OriginMetadata originMetadata = new OriginMetadata(buildInvocationScopeId.asString(), originExecutionTime);
 
         return new CurrentSnapshotResult() {
             @Override
-            public ImmutableSortedMap<String, FileSystemSnapshot> getOutputFilesProduceByWork() {
-                return outputFilesProduceByWork;
+            public Optional<AfterExecutionState> getAfterExecutionState() {
+                return afterExecutionState;
             }
 
             @Override
@@ -82,22 +89,43 @@ public class CaptureStateAfterExecutionStep<C extends BeforeExecutionContext> ex
             }
 
             @Override
+            public Duration getDuration() {
+                return duration;
+            }
+
+            @Override
             public boolean isReused() {
                 return false;
             }
         };
     }
 
-    private ImmutableSortedMap<String, FileSystemSnapshot> captureOutputs(UnitOfWork work, BeforeExecutionContext context) {
-        boolean hasDetectedOverlappingOutputs = context.getBeforeExecutionState()
-            .flatMap(BeforeExecutionState::getDetectedOverlappingOutputs)
-            .isPresent();
+    private Optional<AfterExecutionState> captureStateAfterExecution(UnitOfWork work, BeforeExecutionContext context, BeforeExecutionState beforeExecutionState) {
+        return operation(
+            operationContext -> {
+                try {
+                    ImmutableSortedMap<String, FileSystemSnapshot> outputsProducedByWork = captureOutputs(work, context, beforeExecutionState);
+                    AfterExecutionState afterExecutionState = new DefaultAfterExecutionState(beforeExecutionState, outputsProducedByWork);
+                    operationContext.setResult(Operation.Result.INSTANCE);
+                    return Optional.of(afterExecutionState);
+                } catch (OutputSnapshotter.OutputFileSnapshottingException e) {
+                    work.handleUnreadableOutputs(e);
+                    operationContext.setResult(Operation.Result.INSTANCE);
+                    return Optional.empty();
+                }
+            },
+            BuildOperationDescriptor
+                .displayName("Snapshot outputs after executing " + work.getDisplayName())
+                .details(Operation.Details.INSTANCE)
+        );
+    }
 
+    private ImmutableSortedMap<String, FileSystemSnapshot> captureOutputs(UnitOfWork work, BeforeExecutionContext context, BeforeExecutionState beforeExecutionState) {
         ImmutableSortedMap<String, FileSystemSnapshot> unfilteredOutputSnapshotsAfterExecution = outputSnapshotter.snapshotOutputs(work, context.getWorkspace());
 
-        if (hasDetectedOverlappingOutputs) {
-            ImmutableSortedMap<String, FileSystemSnapshot> previousExecutionOutputSnapshots = context.getAfterPreviousExecutionState()
-                .map(AfterPreviousExecutionState::getOutputFilesProducedByWork)
+        if (beforeExecutionState.getDetectedOverlappingOutputs().isPresent()) {
+            ImmutableSortedMap<String, FileSystemSnapshot> previousExecutionOutputSnapshots = context.getPreviousExecutionState()
+                .map(PreviousExecutionState::getOutputFilesProducedByWork)
                 .orElse(ImmutableSortedMap.of());
 
             ImmutableSortedMap<String, FileSystemSnapshot> unfilteredOutputSnapshotsBeforeExecution = context.getBeforeExecutionState()
@@ -115,11 +143,13 @@ public class CaptureStateAfterExecutionStep<C extends BeforeExecutionContext> ex
      */
     public interface Operation extends BuildOperationType<Operation.Details, Operation.Result> {
         interface Details {
-            Details INSTANCE = new Details() {};
+            Details INSTANCE = new Details() {
+            };
         }
 
         interface Result {
-            Result INSTANCE = new Result() {};
+            Result INSTANCE = new Result() {
+            };
         }
     }
 }

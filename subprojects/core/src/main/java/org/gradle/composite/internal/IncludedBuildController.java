@@ -16,23 +16,46 @@
 package org.gradle.composite.internal;
 
 import org.gradle.api.internal.TaskInternal;
+import org.gradle.internal.build.ExecutionResult;
+import org.gradle.internal.build.ExportedTaskNode;
 
 import java.util.concurrent.ExecutorService;
-import java.util.function.Consumer;
 
 public interface IncludedBuildController {
-    void queueForExecution(String taskPath);
+    /**
+     * Locates a task node in this build's work graph for use in another build's work graph.
+     * Does not schedule the task for execution, use {@link #queueForExecution(ExportedTaskNode)} to queue the task for execution.
+     */
+    ExportedTaskNode locateTask(TaskInternal task);
 
-    IncludedBuildTaskResource.State getTaskState(String taskPath);
+    /**
+     * Locates a task node in this build's work graph for use in another build's work graph.
+     * Does not schedule the task for execution, use {@link #queueForExecution(ExportedTaskNode)} to queue the task for execution.
+     */
+    ExportedTaskNode locateTask(String taskPath);
 
-    TaskInternal getTask(String taskPath);
-
+    /**
+     * Schedules any queued tasks. When this method returns true, then some tasks where scheduled for this build and
+     * this method should be called for all other builds in the tree as they may now have queued tasks.
+     *
+     * @return true if any tasks were scheduled, false if not.
+     */
     boolean populateTaskGraph();
 
+    /**
+     * Prepares the work graph, once all tasks have been scheduled.
+     */
+    void prepareForExecution();
+
+    /**
+     * Must call {@link #populateTaskGraph()} prior to calling this method.
+     */
     void startTaskExecution(ExecutorService executorService);
 
     /**
      * Awaits completion of task execution, collecting any task failures into the given collection.
      */
-    void awaitTaskCompletion(Consumer<? super Throwable> taskFailures);
+    ExecutionResult<Void> awaitTaskCompletion();
+
+    void queueForExecution(ExportedTaskNode taskNode);
 }

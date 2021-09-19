@@ -125,16 +125,13 @@ fun BuildType.paramsForBuildToolBuild(buildJvm: Jvm = BuildToolBuildJvm, os: Os)
         param("env.GRADLE_OPTS", "-Xmx1536m -XX:MaxPermSize=384m")
         param("env.ANDROID_HOME", os.androidHome)
         param("env.ANDROID_SDK_ROOT", os.androidHome)
+        param("env.GRADLE_INTERNAL_REPO_URL", "%gradle.internal.repository.url%")
         if (os == Os.MACOS) {
             // Use fewer parallel forks on macOs, since the agents are not very powerful.
             param("maxParallelForks", "2")
         }
         if (os == Os.LINUX || os == Os.MACOS) {
             param("env.LC_ALL", "en_US.UTF-8")
-        }
-
-        if (os == Os.MACOS) {
-            param("env.REPO_MIRROR_URLS", "")
         }
     }
 }
@@ -154,6 +151,7 @@ fun buildToolGradleParameters(daemon: Boolean = true, isContinue: Boolean = true
         // for each test task, such that we are independent of whatever default value is defined in the build itself.
         "-Dorg.gradle.workers.max=%maxParallelForks%",
         "-PmaxParallelForks=%maxParallelForks%",
+        "-Dorg.gradle.internal.plugins.portal.url.override=%gradle.plugins.portal.url%",
         "-s",
         if (daemon) "--daemon" else "--no-daemon",
         if (isContinue) "--continue" else ""
